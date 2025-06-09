@@ -2,7 +2,7 @@ import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced } from "../../../../script.js";
 
 const EXT_ID = "LittleWhiteBox";
-const EXT_NAME = "白盒";
+const EXT_NAME = "小白X";
 
 extension_settings[EXT_ID] = extension_settings[EXT_ID] || {
     enabled: true,
@@ -287,7 +287,7 @@ function renderHtmlInIframe(htmlContent, container, codeBlock) {
         
         return iframe;
     } catch (err) {
-        console.error('[白盒] 渲染失败:', err);
+        console.error('[小白X] 渲染失败:', err);
         return null;
     }
 }
@@ -369,13 +369,13 @@ async function setupSettings() {
         const settingsHtml = `
         <div class="inline-drawer">
             <div class="inline-drawer-toggle inline-drawer-header">
-                <b>白盒</b>
+                <b>小白X</b>
                 <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
             </div>
             <div class="inline-drawer-content">
                 <div class="flex-container">
                     <input type="checkbox" id="xiaobaix_enabled" ${settings.enabled ? 'checked' : ''} />
-                    <label for="xiaobaix_enabled">启用白盒</label>
+                    <label for="xiaobaix_enabled">启用小白X</label>
                 </div>
                 
                 <div class="flex-container">
@@ -463,7 +463,7 @@ function addStyles() {
 
 async function initExtension() {
     try {
-        console.log('[白盒] 初始化中...');
+        console.log('[小白X] 初始化中...');
         
         addStyles();
         await setupSettings();
@@ -473,9 +473,9 @@ async function initExtension() {
         
         setInterval(processExistingMessages, 5000);
         
-        console.log('[白盒] 初始化完成！');
+        console.log('[小白X] 初始化完成！');
     } catch (err) {
-        console.error('[白盒] 初始化失败:', err);
+        console.error('[小白X] 初始化失败:', err);
     }
 }
 
