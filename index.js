@@ -1,7 +1,7 @@
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced } from "../../../../script.js";
 
-const EXT_ID = "LittleWhitex";
+const EXT_ID = "LittleWhiteBox";
 const EXT_NAME = "白盒";
 
 extension_settings[EXT_ID] = extension_settings[EXT_ID] || {
