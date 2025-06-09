@@ -22,7 +22,7 @@ async function waitForElement(selector, root = document, timeout = 10000) {
 }
 
 function generateUniqueId() {
-    return `xiaobaix-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    return `littlewhitebox-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 }
 
 function shouldRenderContent(content, className) {
@@ -51,7 +51,7 @@ function createIframeApi() {
         sendMessageToST: function(type, data = {}) {
             try {
                 window.parent.postMessage({
-                    source: 'xiaobaix-iframe',
+                    source: 'littlewhitebox-iframe',
                     type: type, 
                     ...data
                 }, '*');
@@ -76,7 +76,7 @@ function createIframeApi() {
                 window.STBridge.sendMessageToST('runCommand', { command, id });
                 
                 const listener = function(event) {
-                    if (!event.data || event.data.source !== 'xiaobaix-host') return;
+                    if (!event.data || event.data.source !== 'littlewhitebox-host') return;
                     
                     const data = event.data;
                     if ((data.type === 'commandResult' || data.type === 'commandError') && data.id === id) {
@@ -202,7 +202,7 @@ async function executeSlashCommand(command) {
 }
 
 function handleIframeMessage(event) {
-    if (!event.data || event.data.source !== 'xiaobaix-iframe') return;
+    if (!event.data || event.data.source !== 'littlewhitebox-iframe') return;
     
     const data = event.data;
     
@@ -218,7 +218,7 @@ function handleIframeMessage(event) {
 
 function handleResizeMessage(source, data) {
     try {
-        const iframes = document.querySelectorAll('iframe.xiaobaix-iframe');
+        const iframes = document.querySelectorAll('iframe.littlewhitebox-iframe');
         for (const iframe of iframes) {
             if (iframe.contentWindow === source) {
                 iframe.style.height = `${data.height}px`;
@@ -233,14 +233,14 @@ async function handleCommandMessage(source, data) {
         const result = await executeSlashCommand(data.command);
         
         source.postMessage({
-            source: 'xiaobaix-host',
+            source: 'littlewhitebox-host',
             type: 'commandResult',
             id: data.id,
             result: result
         }, '*');
     } catch (err) {
         source.postMessage({
-            source: 'xiaobaix-host',
+            source: 'littlewhitebox-host',
             type: 'commandError',
             id: data.id,
             error: err.message || String(err)
@@ -254,7 +254,7 @@ function renderHtmlInIframe(htmlContent, container, codeBlock) {
         
         const iframe = document.createElement('iframe');
         iframe.id = iframeId;
-        iframe.className = 'xiaobaix-iframe';
+        iframe.className = 'littlewhitebox-iframe';
         iframe.style.cssText = `
             width: 100%;
             border: none;
@@ -349,8 +349,8 @@ function processCodeBlocks(messageElement) {
         codeBlocks.forEach(codeBlock => {
             const preElement = codeBlock.parentElement;
             
-            if (preElement.dataset.xiaobaixBound === 'true') return;
-            preElement.dataset.xiaobaixBound = 'true';
+            if (preElement.dataset.littlewhiteboxBound === 'true') return;
+            preElement.dataset.littlewhiteboxBound = 'true';
             
             const codeContent = codeBlock.textContent || '';
             const codeClass = codeBlock.className || '';
@@ -374,13 +374,13 @@ async function setupSettings() {
             </div>
             <div class="inline-drawer-content">
                 <div class="flex-container">
-                    <input type="checkbox" id="xiaobaix_enabled" ${settings.enabled ? 'checked' : ''} />
-                    <label for="xiaobaix_enabled">启用白盒</label>
+                    <input type="checkbox" id="littlewhitebox_enabled" ${settings.enabled ? 'checked' : ''} />
+                    <label for="littlewhitebox_enabled">启用白盒</label>
                 </div>
                 
                 <div class="flex-container">
-                    <input type="checkbox" id="xiaobaix_sandbox" ${settings.sandboxMode ? 'checked' : ''} />
-                    <label for="xiaobaix_sandbox">沙盒模式</label>
+                    <input type="checkbox" id="littlewhitebox_sandbox" ${settings.sandboxMode ? 'checked' : ''} />
+                    <label for="littlewhitebox_sandbox">沙盒模式</label>
                 </div>
                 
                 <hr class="sysHR" />
@@ -406,12 +406,12 @@ await STscript('/echo 操作完成！');</pre>
 
         $(settingsContainer).append(settingsHtml);
 
-        $("#xiaobaix_enabled").on("change", function() {
+        $("#littlewhitebox_enabled").on("change", function() {
             settings.enabled = !!$(this).prop("checked");
             saveSettingsDebounced();
         });
         
-        $("#xiaobaix_sandbox").on("change", function() {
+        $("#littlewhitebox_sandbox").on("change", function() {
             settings.sandboxMode = !!$(this).prop("checked");
             saveSettingsDebounced();
         });
@@ -450,11 +450,11 @@ function processExistingMessages() {
 function addStyles() {
     const styleElement = document.createElement('style');
     styleElement.textContent = `
-        .xiaobaix-iframe {
+        .littlewhitebox-iframe {
             transition: height 0.3s ease;
         }
         
-        pre:has(+ .xiaobaix-iframe) {
+        pre:has(+ .littlewhitebox-iframe) {
             display: none;
         }
     `;
