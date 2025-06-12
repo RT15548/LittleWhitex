@@ -16,7 +16,7 @@ const defaultSettings = { enabled: false, globalTasks: [], processedMessages: []
 
 let currentEditingTask = null, currentEditingIndex = -1, lastChatId = null, chatJustChanged = false, isNewChat = false, lastTurnCount = 0;
 let isExecutingTask = false, isCommandGenerated = false;
-const TASK_COOLDOWN = 1000;
+const TASK_COOLDOWN = 3000;
 const taskLastExecutionTime = new Map();
 
 // 获取并初始化设置
