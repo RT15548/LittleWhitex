@@ -15,26 +15,31 @@ const EXT_ID = "LittleWhiteBox";
 const defaultSettings = { enabled: false, globalTasks: [], processedMessages: [], character_allowed_tasks: [] };
 
 let currentEditingTask = null, currentEditingIndex = -1, lastChatId = null, chatJustChanged = false, isNewChat = false, lastTurnCount = 0;
-
-let isExecutingTask = false;
-let lastExecutionTime = 0;
-const EXECUTION_COOLDOWN = 3000;
-let isCommandGenerated = false;
+let isExecutingTask = false, isCommandGenerated = false;
+const TASK_COOLDOWN = 1000;
+const taskLastExecutionTime = new Map();
 
 // 获取并初始化设置
 function getSettings() {
     if (!extension_settings[EXT_ID].tasks) extension_settings[EXT_ID].tasks = structuredClone(defaultSettings);
-    
     const settings = extension_settings[EXT_ID].tasks;
-    
     Object.keys(defaultSettings).forEach(key => {
         if (settings[key] === undefined) settings[key] = defaultSettings[key];
     });
-    
     return settings;
 }
 
-// 管理消息处理状态
+// 冷却管理
+function isTaskInCooldown(taskName) {
+    const lastExecution = taskLastExecutionTime.get(taskName);
+    return lastExecution && (Date.now() - lastExecution) < TASK_COOLDOWN;
+}
+
+function setTaskCooldown(taskName) {
+    taskLastExecutionTime.set(taskName, Date.now());
+}
+
+// 消息处理状态管理
 function isMessageProcessed(messageKey) { 
     return getSettings().processedMessages.includes(messageKey); 
 }
@@ -48,7 +53,7 @@ function markMessageAsProcessed(messageKey) {
     }
 }
 
-// 获取角色任务
+// 角色任务管理
 function getCharacterTasks() {
     if (!this_chid || !characters[this_chid]) return [];
     const character = characters[this_chid];
@@ -60,7 +65,6 @@ function getCharacterTasks() {
     return character.data.extensions[TASKS_MODULE_NAME].tasks || [];
 }
 
-// 保存角色任务
 async function saveCharacterTasks(tasks) {
     if (!this_chid || !characters[this_chid]) return;
     await writeExtensionField(Number(this_chid), TASKS_MODULE_NAME, { tasks });
@@ -73,18 +77,14 @@ async function saveCharacterTasks(tasks) {
     }
 }
 
-// executeCommands函数
-async function executeCommands(commands) {
+// 执行命令
+async function executeCommands(commands, taskName) {
     if (!commands?.trim()) return null;
-    
     isCommandGenerated = true;
     isExecutingTask = true;
-    
     try {
-        const result = await executeSlashCommand(commands);
-        return result;
+        return await executeSlashCommand(commands);
     } finally {
-
         setTimeout(() => {
             isCommandGenerated = false;
             isExecutingTask = false;
@@ -92,28 +92,18 @@ async function executeCommands(commands) {
     }
 }
 
-// 根据楼层类型计算当前楼层数
+// 计算楼层和轮次
 function calculateFloorByType(floorType) {
     if (!Array.isArray(chat) || chat.length === 0) return 0;
-    
     let count = 0;
     switch (floorType) {
-        case 'user':
-            count = Math.max(0, chat.filter(msg => msg.is_user && !msg.is_system).length - 1);
-            break;
-        case 'llm':
-            count = Math.max(0, chat.filter(msg => !msg.is_user && !msg.is_system).length - 1);
-            break;
-        default:
-            count = Math.max(0, chat.length - 1);
-            break;
+        case 'user': count = Math.max(0, chat.filter(msg => msg.is_user && !msg.is_system).length - 1); break;
+        case 'llm': count = Math.max(0, chat.filter(msg => !msg.is_user && !msg.is_system).length - 1); break;
+        default: count = Math.max(0, chat.length - 1); break;
     }
-    
-    console.debug(`[Tasks] 计算楼层 - 类型: ${floorType}, 楼层数: ${count}, 总消息数: ${chat.length}`);
     return count;
 }
 
-// 计算对话轮次
 function calculateTurnCount() {
     if (!Array.isArray(chat) || chat.length === 0) return 0;
     const userMessages = chat.filter(msg => msg.is_user && !msg.is_system).length;
@@ -121,80 +111,56 @@ function calculateTurnCount() {
     return Math.min(userMessages, aiMessages);
 }
 
-// 改进的任务执行检查函数
+// 任务执行检查
 async function checkAndExecuteTasks(triggerContext = 'after_ai', overrideChatChanged = null, overrideNewChat = null) {
     const settings = getSettings();
-    if (!settings.enabled || (overrideChatChanged ?? chatJustChanged) || (overrideNewChat ?? isNewChat)) return;
-    
-    // 防止重复执行
-    if (isExecutingTask) {
-        console.debug('[Tasks] 任务正在执行中，跳过');
-        return;
-    }
+    if (!settings.enabled || (overrideChatChanged ?? chatJustChanged) || (overrideNewChat ?? isNewChat) || isExecutingTask) return;
     
     const allTasks = [...settings.globalTasks, ...getCharacterTasks()];
+    const executedTasksInThisCheck = [];
     
     for (const task of allTasks) {
-        if (task.disabled || task.interval <= 0) continue;
+        if (task.disabled || task.interval <= 0 || isTaskInCooldown(task.name) || executedTasksInThisCheck.includes(task.name)) continue;
         
         const taskTriggerTiming = task.triggerTiming || 'after_ai';
+        let shouldExecute = false;
 
         if (taskTriggerTiming === 'per_turn') {
             if (triggerContext !== 'after_ai') continue;
             const currentTurnCount = calculateTurnCount();
-            if (currentTurnCount > lastTurnCount && currentTurnCount % task.interval === 0) {
-                console.debug(`[Tasks] 执行按轮次任务: ${task.name}`);
-                await executeCommands(task.commands);
-                break;
-            }
+            if (currentTurnCount > lastTurnCount && currentTurnCount % task.interval === 0) shouldExecute = true;
         } else {
             if (taskTriggerTiming !== triggerContext) continue;
             const currentFloor = calculateFloorByType(task.floorType || 'all');
-            if (currentFloor % task.interval === 0 && currentFloor > 0) { // 添加 > 0 检查
-                console.debug(`[Tasks] 执行楼层任务: ${task.name}, 当前楼层: ${currentFloor}`);
-                await executeCommands(task.commands);
-                break;
-            }
+            if (currentFloor % task.interval === 0 && currentFloor > 0) shouldExecute = true;
+        }
+        
+        if (shouldExecute) {
+            setTaskCooldown(task.name);
+            executedTasksInThisCheck.push(task.name);
+            await executeCommands(task.commands, task.name);
         }
     }
 
-    if (triggerContext === 'after_ai') {
-        lastTurnCount = calculateTurnCount();
-    }
+    if (triggerContext === 'after_ai') lastTurnCount = calculateTurnCount();
 }
 
-// 改进的消息接收处理函数
+// 事件处理
 async function onMessageReceived(messageId) {
     const settings = getSettings();
     if (!settings.enabled || typeof messageId !== 'number' || messageId < 0 || messageId >= chat.length) return;
     
     const message = chat[messageId];
-    if (!message || message.is_user || message.is_system || message.mes === '...') return;
-    
-    // 防止命令生成的消息触发任务
-    if (isCommandGenerated || isExecutingTask) {
-        console.debug('[Tasks] 跳过命令生成的消息');
-        return;
-    }
-    
-    // 添加冷却时间检查
-    const now = Date.now();
-    if (now - lastExecutionTime < EXECUTION_COOLDOWN) {
-        console.debug('[Tasks] 冷却时间内，跳过执行');
-        return;
-    }
+    if (!message || message.is_user || message.is_system || message.mes === '...' || isCommandGenerated || isExecutingTask) return;
     
     const messageKey = `${getContext().chatId}_${messageId}`;
     if (isMessageProcessed(messageKey)) return;
     
     markMessageAsProcessed(messageKey);
-    lastExecutionTime = now;
-    
     await checkAndExecuteTasks('after_ai');
     chatJustChanged = isNewChat = false;
 }
 
-// 处理用户消息事件
 async function onUserMessage() {
     const settings = getSettings();
     if (!settings.enabled) return;
@@ -205,68 +171,46 @@ async function onUserMessage() {
     chatJustChanged = isNewChat = false;
 }
 
-// 添加消息删除事件处理
 function onMessageDeleted(data) {
-    console.debug('[Tasks] 消息被删除，清理处理状态');
-    
-    // 清理processedMessages中相关的记录
     const settings = getSettings();
     const chatId = getContext().chatId;
-    
-    // 保留当前聊天的有效消息记录
     const validMessageKeys = [];
     for (let i = 0; i < chat.length; i++) {
         validMessageKeys.push(`${chatId}_${i}`);
         validMessageKeys.push(`${chatId}_user_${i}`);
     }
-    
-    // 过滤掉无效的消息记录
     settings.processedMessages = settings.processedMessages.filter(key => {
-        if (key.startsWith(`${chatId}_`)) {
-            return validMessageKeys.some(validKey => key.startsWith(validKey));
-        }
-        return true; // 保留其他聊天的记录
+        if (key.startsWith(`${chatId}_`)) return validMessageKeys.some(validKey => key.startsWith(validKey));
+        return true;
     });
-    
     saveSettingsDebounced();
 }
 
-// 改进的聊天切换处理
 function onChatChanged(chatId) {
-    console.debug(`[Tasks] 聊天切换到: ${chatId}`);
-    
     chatJustChanged = true;
     isNewChat = lastChatId !== chatId && chat.length <= 1;
     lastChatId = chatId;
     lastTurnCount = 0;
-    
-    // 重置执行状态
     isExecutingTask = false;
     isCommandGenerated = false;
-    lastExecutionTime = 0;
+    taskLastExecutionTime.clear();
     
-    // 清理当前聊天的处理记录
     const settings = getSettings();
-    settings.processedMessages = settings.processedMessages.filter(key => 
-        !key.startsWith(`${chatId}_`)
-    );
+    settings.processedMessages = settings.processedMessages.filter(key => !key.startsWith(`${chatId}_`));
     saveSettingsDebounced();
     
     checkEmbeddedTasks();
     refreshTaskLists();
-    
-    setTimeout(() => { 
-        chatJustChanged = isNewChat = false; 
-    }, 2000);
+    setTimeout(() => { chatJustChanged = isNewChat = false; }, 2000);
 }
 
-// 创建任务UI项
+// UI管理
 function createTaskItem(task, index, isCharacterTask = false) {
     if (!task.id) task.id = `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const taskType = isCharacterTask ? 'character' : 'global';
-    const floorTypeText = { user: '用戶樓層', llm: 'LLM樓層' }[task.floorType] || '全部樓層';
-    const triggerTimingText = { before_user: '用戶前', per_turn: '每輪' }[task.triggerTiming] || 'AI後';
-    const displayName = task.interval === 0 ? `${task.name} (手動激活)` : `${task.name} (每${task.interval}${floorTypeText}·${triggerTimingText})`;
+    const floorTypeText = { user: '用户楼层', llm: 'LLM楼层' }[task.floorType] || '全部楼层';
+    const triggerTimingText = { before_user: '用户前', per_turn: '每轮' }[task.triggerTiming] || 'AI后';
+    const displayName = task.interval === 0 ? `${task.name} (手动激活)` : `${task.name} (每${task.interval}${floorTypeText}·${triggerTimingText})`;
 
     const taskElement = $('#task_item_template').children().first().clone();
     taskElement.attr({ id: task.id, 'data-index': index, 'data-type': taskType });
@@ -281,14 +225,12 @@ function createTaskItem(task, index, isCharacterTask = false) {
     return taskElement;
 }
 
-// 刷新任务列表显示
 function refreshTaskLists() {
     $('#global_tasks_list, #character_tasks_list').empty();
     getSettings().globalTasks.forEach((task, i) => $('#global_tasks_list').append(createTaskItem(task, i, false)));
     getCharacterTasks().forEach((task, i) => $('#character_tasks_list').append(createTaskItem(task, i, true)));
 }
 
-// 显示任务编辑器
 function showTaskEditor(task = null, isEdit = false, isCharacterTask = false) {
     currentEditingTask = task;
     currentEditingIndex = isEdit ? (isCharacterTask ? getCharacterTasks() : getSettings().globalTasks).indexOf(task) : -1;
@@ -318,7 +260,6 @@ function showTaskEditor(task = null, isEdit = false, isCharacterTask = false) {
     });
 }
 
-// 从编辑器保存任务
 function saveTaskFromEditor(task, isCharacterTask) {
     if (!task.name || !task.commands) return;
     if (isCharacterTask) {
@@ -335,7 +276,6 @@ function saveTaskFromEditor(task, isCharacterTask) {
     refreshTaskLists();
 }
 
-// 保存任务更改
 function saveTask(task, index, isCharacterTask) {
     const tasks = isCharacterTask ? getCharacterTasks() : getSettings().globalTasks;
     if (index >= 0 && index < tasks.length) tasks[index] = task;
@@ -343,38 +283,33 @@ function saveTask(task, index, isCharacterTask) {
     refreshTaskLists();
 }
 
-// 测试执行指定任务
 async function testTask(index, type) {
     const task = (type === 'character' ? getCharacterTasks() : getSettings().globalTasks)[index];
-    if (task) await executeCommands(task.commands);
+    if (task) await executeCommands(task.commands, task.name);
 }
 
-// 编辑指定任务
 function editTask(index, type) {
     const task = (type === 'character' ? getCharacterTasks() : getSettings().globalTasks)[index];
     if (task) showTaskEditor(task, true, type === 'character');
 }
 
-// 删除指定任务
 function deleteTask(index, type) {
     const task = (type === 'character' ? getCharacterTasks() : getSettings().globalTasks)[index];
     if (!task) return;
     
-    const confirmText = `確定要刪除任務 "${task.name}" 嗎？`;
     $(document).off('keydown.confirmmodal');
     $('.xiaobaix-confirm-modal').remove();
     
     const dialogHtml = `
     <div class="xiaobaix-confirm-modal">
         <div class="xiaobaix-confirm-content">
-            <div class="xiaobaix-confirm-message">${confirmText}</div>
+            <div class="xiaobaix-confirm-message">确定要删除任务 "${task.name}" 吗？</div>
             <div class="xiaobaix-confirm-buttons">
                 <button class="xiaobaix-confirm-yes">确定</button>
                 <button class="xiaobaix-confirm-no">取消</button>
             </div>
         </div>
-    </div>
-    `;
+    </div>`;
     
     $('body').append(dialogHtml);
     
@@ -391,14 +326,8 @@ function deleteTask(index, type) {
         refreshTaskLists();
     });
     
-    $('.xiaobaix-confirm-no').on('click', function() {
-        $('.xiaobaix-confirm-modal').remove();
-    });
-    
-    $('.xiaobaix-confirm-modal').on('click', function(e) {
-        if (e.target === this) {
-            $(this).remove();
-        }
+    $('.xiaobaix-confirm-no, .xiaobaix-confirm-modal').on('click', function(e) {
+        if (e.target === this) $('.xiaobaix-confirm-modal').remove();
     });
     
     $(document).on('keydown.confirmmodal', function(e) {
@@ -409,19 +338,17 @@ function deleteTask(index, type) {
     });
 }
 
-// 测试执行所有启用的任务
 async function testAllTasks() {
     for (const task of [...getSettings().globalTasks, ...getCharacterTasks()]) {
-        if (!task.disabled) await executeCommands(task.commands);
+        if (!task.disabled) await executeCommands(task.commands, task.name);
     }
 }
 
-// 获取所有任务名称列表
 function getAllTaskNames() {
     return [...getSettings().globalTasks, ...getCharacterTasks()].filter(t => !t.disabled).map(t => t.name);
 }
 
-// 检查并处理角色嵌入任务
+// 嵌入任务检查
 async function checkEmbeddedTasks() {
     if (!this_chid) return;
     const avatar = characters[this_chid]?.avatar;
@@ -448,10 +375,9 @@ async function checkEmbeddedTasks() {
                         taskPreview.find('.task-preview-commands').text(task.commands);
                         taskListContainer.append(taskPreview);
                     });
-                    result = await callGenericPopup(templateElement, POPUP_TYPE.CONFIRM, '', { okButton: '允許' });
+                    result = await callGenericPopup(templateElement, POPUP_TYPE.CONFIRM, '', { okButton: '允许' });
                 } catch (error) {
-                    console.error("Error loading template:", error);
-                    result = await callGenericPopup(`此角色包含 ${tasks.length} 個定時任務。是否允許使用？`, POPUP_TYPE.CONFIRM, '', { okButton: '允許' });
+                    result = await callGenericPopup(`此角色包含 ${tasks.length} 个定时任务。是否允许使用？`, POPUP_TYPE.CONFIRM, '', { okButton: '允许' });
                 }
                 if (result) {
                     settings.character_allowed_tasks.push(avatar);
@@ -463,7 +389,7 @@ async function checkEmbeddedTasks() {
     refreshTaskLists();
 }
 
-// 导出角色任务到文件
+// 导入导出
 async function exportCharacterTasks() {
     if (!this_chid || !characters[this_chid]) return;
     const tasks = getCharacterTasks();
@@ -474,44 +400,59 @@ async function exportCharacterTasks() {
     download(fileData, fileName, 'application/json');
 }
 
-// 从文件导入角色任务
 async function importCharacterTasks(file) {
     if (!file || !this_chid || !characters[this_chid]) return;
     try {
         const fileText = await getFileText(file);
         const importData = JSON.parse(fileText);
-        if (!Array.isArray(importData.tasks)) throw new Error('無效的任務文件格式');
+        if (!Array.isArray(importData.tasks)) throw new Error('无效的任务文件格式');
         const tasksToImport = importData.tasks.map(task => ({ ...task, id: uuidv4(), importedAt: new Date().toISOString() }));
         await saveCharacterTasks([...getCharacterTasks(), ...tasksToImport]);
         refreshTaskLists();
     } catch (error) {
-        console.error('任務導入失敗:', error);
+        console.error('任务导入失败:', error);
     }
 }
 
-// 添加手动清理功能
+// 工具函数
 function clearProcessedMessages() {
-    const settings = getSettings();
-    settings.processedMessages = [];
+    getSettings().processedMessages = [];
     saveSettingsDebounced();
-    console.log('[Tasks] 已清理所有处理记录');
 }
 
-// 全局API - 根据名称执行任务
+function clearTaskCooldown(taskName = null) {
+    if (taskName) taskLastExecutionTime.delete(taskName);
+    else taskLastExecutionTime.clear();
+}
+
+function getTaskCooldownStatus() {
+    const status = {};
+    for (const [taskName, lastTime] of taskLastExecutionTime.entries()) {
+        const remaining = Math.max(0, TASK_COOLDOWN - (Date.now() - lastTime));
+        status[taskName] = { lastExecutionTime: lastTime, remainingCooldown: remaining, isInCooldown: remaining > 0 };
+    }
+    return status;
+}
+
+// 全局API
 window.executeScheduledTaskByName = async (name) => {
-    if (!name?.trim()) throw new Error('請提供任務名稱');
+    if (!name?.trim()) throw new Error('请提供任务名称');
     const task = [...getSettings().globalTasks, ...getCharacterTasks()].find(t => t.name.toLowerCase() === name.toLowerCase());
-    if (!task) throw new Error(`找不到名為 "${name}" 的任務`);
-    if (task.disabled) throw new Error(`任務 "${name}" 已被禁用`);
-    const result = await executeCommands(task.commands);
-    return result || `已執行任務: ${task.name}`;
+    if (!task) throw new Error(`找不到名为 "${name}" 的任务`);
+    if (task.disabled) throw new Error(`任务 "${name}" 已被禁用`);
+    if (isTaskInCooldown(task.name)) {
+        const cooldownStatus = getTaskCooldownStatus()[task.name];
+        throw new Error(`任务 "${name}" 仍在冷却中，剩余 ${cooldownStatus.remainingCooldown}ms`);
+    }
+    setTaskCooldown(task.name);
+    const result = await executeCommands(task.commands, task.name);
+    return result || `已执行任务: ${task.name}`;
 };
 
-// 全局API - 根据名称设置任务间隔
 window.setScheduledTaskInterval = async (name, interval) => {
-    if (!name?.trim()) throw new Error('請提供任務名稱');
+    if (!name?.trim()) throw new Error('请提供任务名称');
     const intervalNum = parseInt(interval);
-    if (isNaN(intervalNum) || intervalNum < 0 || intervalNum > 99999) throw new Error('間隔必須是 0-99999 之間的數字');
+    if (isNaN(intervalNum) || intervalNum < 0 || intervalNum > 99999) throw new Error('间隔必须是 0-99999 之间的数字');
 
     const settings = getSettings();
     const globalTaskIndex = settings.globalTasks.findIndex(t => t.name.toLowerCase() === name.toLowerCase());
@@ -519,7 +460,7 @@ window.setScheduledTaskInterval = async (name, interval) => {
         settings.globalTasks[globalTaskIndex].interval = intervalNum;
         saveSettingsDebounced();
         refreshTaskLists();
-        return `已設置全局任務 "${name}" 的間隔為 ${intervalNum === 0 ? '手動激活' : `每${intervalNum}樓層`}`;
+        return `已设置全局任务 "${name}" 的间隔为 ${intervalNum === 0 ? '手动激活' : `每${intervalNum}楼层`}`;
     }
 
     const characterTasks = getCharacterTasks();
@@ -528,13 +469,14 @@ window.setScheduledTaskInterval = async (name, interval) => {
         characterTasks[characterTaskIndex].interval = intervalNum;
         await saveCharacterTasks(characterTasks);
         refreshTaskLists();
-        return `已設置角色任務 "${name}" 的間隔為 ${intervalNum === 0 ? '手動激活' : `每${intervalNum}樓層`}`;
+        return `已设置角色任务 "${name}" 的间隔为 ${intervalNum === 0 ? '手动激活' : `每${intervalNum}楼层`}`;
     }
-    throw new Error(`找不到名為 "${name}" 的任務`);
+    throw new Error(`找不到名为 "${name}" 的任务`);
 };
 
-// 导出清理函数供调试使用
 window.clearTasksProcessedMessages = clearProcessedMessages;
+window.clearTaskCooldown = clearTaskCooldown;
+window.getTaskCooldownStatus = getTaskCooldownStatus;
 
 // 注册斜杠命令
 function registerSlashCommands() {
@@ -542,20 +484,20 @@ function registerSlashCommands() {
         SlashCommandParser.addCommandObject(SlashCommand.fromProps({
             name: 'xbqte',
             callback: async (args, value) => {
-                if (!value) return '請提供任務名稱。用法: /xbqte 任務名稱';
+                if (!value) return '请提供任务名称。用法: /xbqte 任务名称';
                 try {
                     return await window.executeScheduledTaskByName(value);
                 } catch (error) {
-                    return `錯誤: ${error.message}`;
+                    return `错误: ${error.message}`;
                 }
             },
             unnamedArgumentList: [SlashCommandArgument.fromProps({
-                description: '要執行的任務名稱',
+                description: '要执行的任务名称',
                 typeList: [ARGUMENT_TYPE.STRING],
                 isRequired: true,
                 enumProvider: getAllTaskNames
             })],
-            helpString: '執行指定名稱的定時任務。例如: /xbqte 我的任務名稱'
+            helpString: '执行指定名称的定时任务。例如: /xbqte 我的任务名称'
         }));
 
         SlashCommandParser.addCommandObject(SlashCommand.fromProps({
@@ -563,21 +505,21 @@ function registerSlashCommands() {
             callback: async (args, value) => {
                 const valueStr = String(value || '').trim();
                 const parts = valueStr.split(/\s+/);
-                if (!parts || parts.length < 2) return '用法: /xbset 任務名稱 間隔數字\n例如: /xbset 我的任務 5\n設為0表示手動激活';
+                if (!parts || parts.length < 2) return '用法: /xbset 任务名称 间隔数字\n例如: /xbset 我的任务 5\n设为0表示手动激活';
                 const interval = parts.pop();
                 const taskName = parts.join(' ');
                 try {
                     return await window.setScheduledTaskInterval(taskName, interval);
                 } catch (error) {
-                    return `錯誤: ${error.message}`;
+                    return `错误: ${error.message}`;
                 }
             },
             unnamedArgumentList: [SlashCommandArgument.fromProps({
-                description: '任務名稱 間隔數字',
+                description: '任务名称 间隔数字',
                 typeList: [ARGUMENT_TYPE.STRING],
                 isRequired: true
             })],
-            helpString: '設置定時任務的觸發間隔。用法: /xbset 任務名稱 間隔數字\n例如: /xbset 我的任務 5 (每5樓層觸發)\n設為0表示手動激活'
+            helpString: '设置定时任务的触发间隔。用法: /xbset 任务名称 间隔数字\n例如: /xbset 我的任务 5 (每5楼层触发)\n设为0表示手动激活'
         }));
     } catch (error) {
         console.error("Error registering slash commands:", error);
@@ -586,51 +528,27 @@ function registerSlashCommands() {
 
 // 初始化模块
 function initTasks() {
-    // 初始化任务设置
-    if (!extension_settings[EXT_ID].tasks) {
-        extension_settings[EXT_ID].tasks = structuredClone(defaultSettings);
-    }
+    if (!extension_settings[EXT_ID].tasks) extension_settings[EXT_ID].tasks = structuredClone(defaultSettings);
     
-    // 绑定UI事件
-    $('#scheduled_tasks_enabled').on('input', e => { 
-        getSettings().enabled = $(e.target).prop('checked'); 
-        saveSettingsDebounced(); 
-    });
-    
+    $('#scheduled_tasks_enabled').on('input', e => { getSettings().enabled = $(e.target).prop('checked'); saveSettingsDebounced(); });
     $('#add_global_task').on('click', () => showTaskEditor(null, false, false));
     $('#add_character_task').on('click', () => showTaskEditor(null, false, true));
     $('#test_all_tasks').on('click', testAllTasks);
     $('#export_character_tasks').on('click', exportCharacterTasks);
     $('#import_character_tasks').on('click', () => $('#import_tasks_file').trigger('click'));
-    
     $('#import_tasks_file').on('change', function(e) {
         const file = e.target.files[0];
-        if (file) { 
-            importCharacterTasks(file); 
-            $(this).val(''); 
-        }
+        if (file) { importCharacterTasks(file); $(this).val(''); }
     });
     
-    // 设置UI状态
-    const settings = getSettings();
-    $('#scheduled_tasks_enabled').prop('checked', settings.enabled);
+    $('#scheduled_tasks_enabled').prop('checked', getSettings().enabled);
     refreshTaskLists();
     
-    // 注册事件监听
     eventSource.on(event_types.MESSAGE_RECEIVED, onMessageReceived);
     eventSource.on(event_types.USER_MESSAGE_RENDERED, onUserMessage);
     eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
-    
-    // 添加消息删除事件监听
     eventSource.on(event_types.MESSAGE_DELETED, onMessageDeleted);
-    eventSource.on(event_types.MESSAGE_SWIPED, () => {
-        // 消息滑动时也清理状态
-        console.debug('[Tasks] 消息滑动，重置执行状态');
-        isExecutingTask = false;
-        isCommandGenerated = false;
-    });
-    
-    // 处理角色删除事件
+    eventSource.on(event_types.MESSAGE_SWIPED, () => { isExecutingTask = false; isCommandGenerated = false; });
     eventSource.on(event_types.CHARACTER_DELETED, ({ character }) => {
         const avatar = character?.avatar;
         const settings = getSettings();
@@ -643,16 +561,8 @@ function initTasks() {
         }
     });
     
-    // 注册斜杠命令
     registerSlashCommands();
-    
-    // 初始检查嵌入任务
-    setTimeout(() => {
-        checkEmbeddedTasks();
-    }, 1000);
-    
-    console.log('[Tasks] 插件初始化完成');
+    setTimeout(() => { checkEmbeddedTasks(); }, 1000);
 }
 
 export { initTasks };
-
