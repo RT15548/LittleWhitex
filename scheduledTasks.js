@@ -16,6 +16,11 @@ const defaultSettings = { enabled: false, globalTasks: [], processedMessages: []
 
 let currentEditingTask = null, currentEditingIndex = -1, lastChatId = null, chatJustChanged = false, isNewChat = false, lastTurnCount = 0;
 
+let isExecutingTask = false;
+let lastExecutionTime = 0;
+const EXECUTION_COOLDOWN = 3000;
+let isCommandGenerated = false;
+
 // 获取并初始化设置
 function getSettings() {
     if (!extension_settings[EXT_ID].tasks) extension_settings[EXT_ID].tasks = structuredClone(defaultSettings);
@@ -68,19 +73,44 @@ async function saveCharacterTasks(tasks) {
     }
 }
 
-// 执行斜杠命令
+// executeCommands函数
 async function executeCommands(commands) {
-    return commands?.trim() ? await executeSlashCommand(commands) : null;
+    if (!commands?.trim()) return null;
+    
+    isCommandGenerated = true;
+    isExecutingTask = true;
+    
+    try {
+        const result = await executeSlashCommand(commands);
+        return result;
+    } finally {
+
+        setTimeout(() => {
+            isCommandGenerated = false;
+            isExecutingTask = false;
+        }, 500);
+    }
 }
 
 // 根据楼层类型计算当前楼层数
 function calculateFloorByType(floorType) {
     if (!Array.isArray(chat) || chat.length === 0) return 0;
+    
+    let count = 0;
     switch (floorType) {
-        case 'user': return Math.max(0, chat.filter(msg => msg.is_user && !msg.is_system).length - 1);
-        case 'llm': return Math.max(0, chat.filter(msg => !msg.is_user && !msg.is_system).length - 1);
-        default: return Math.max(0, chat.length - 1);
+        case 'user':
+            count = Math.max(0, chat.filter(msg => msg.is_user && !msg.is_system).length - 1);
+            break;
+        case 'llm':
+            count = Math.max(0, chat.filter(msg => !msg.is_user && !msg.is_system).length - 1);
+            break;
+        default:
+            count = Math.max(0, chat.length - 1);
+            break;
     }
+    
+    console.debug(`[Tasks] 计算楼层 - 类型: ${floorType}, 楼层数: ${count}, 总消息数: ${chat.length}`);
+    return count;
 }
 
 // 计算对话轮次
@@ -91,45 +121,75 @@ function calculateTurnCount() {
     return Math.min(userMessages, aiMessages);
 }
 
-// 检查并执行符合条件的任务
+// 改进的任务执行检查函数
 async function checkAndExecuteTasks(triggerContext = 'after_ai', overrideChatChanged = null, overrideNewChat = null) {
     const settings = getSettings();
     if (!settings.enabled || (overrideChatChanged ?? chatJustChanged) || (overrideNewChat ?? isNewChat)) return;
-
+    
+    // 防止重复执行
+    if (isExecutingTask) {
+        console.debug('[Tasks] 任务正在执行中，跳过');
+        return;
+    }
+    
     const allTasks = [...settings.globalTasks, ...getCharacterTasks()];
+    
     for (const task of allTasks) {
         if (task.disabled || task.interval <= 0) continue;
+        
         const taskTriggerTiming = task.triggerTiming || 'after_ai';
 
         if (taskTriggerTiming === 'per_turn') {
             if (triggerContext !== 'after_ai') continue;
             const currentTurnCount = calculateTurnCount();
             if (currentTurnCount > lastTurnCount && currentTurnCount % task.interval === 0) {
+                console.debug(`[Tasks] 执行按轮次任务: ${task.name}`);
                 await executeCommands(task.commands);
                 break;
             }
         } else {
             if (taskTriggerTiming !== triggerContext) continue;
             const currentFloor = calculateFloorByType(task.floorType || 'all');
-            if (currentFloor % task.interval === 0) {
+            if (currentFloor % task.interval === 0 && currentFloor > 0) { // 添加 > 0 检查
+                console.debug(`[Tasks] 执行楼层任务: ${task.name}, 当前楼层: ${currentFloor}`);
                 await executeCommands(task.commands);
                 break;
             }
         }
     }
 
-    if (triggerContext === 'after_ai') lastTurnCount = calculateTurnCount();
+    if (triggerContext === 'after_ai') {
+        lastTurnCount = calculateTurnCount();
+    }
 }
 
-// 处理AI消息接收事件
+// 改进的消息接收处理函数
 async function onMessageReceived(messageId) {
     const settings = getSettings();
     if (!settings.enabled || typeof messageId !== 'number' || messageId < 0 || messageId >= chat.length) return;
+    
     const message = chat[messageId];
     if (!message || message.is_user || message.is_system || message.mes === '...') return;
+    
+    // 防止命令生成的消息触发任务
+    if (isCommandGenerated || isExecutingTask) {
+        console.debug('[Tasks] 跳过命令生成的消息');
+        return;
+    }
+    
+    // 添加冷却时间检查
+    const now = Date.now();
+    if (now - lastExecutionTime < EXECUTION_COOLDOWN) {
+        console.debug('[Tasks] 冷却时间内，跳过执行');
+        return;
+    }
+    
     const messageKey = `${getContext().chatId}_${messageId}`;
     if (isMessageProcessed(messageKey)) return;
+    
     markMessageAsProcessed(messageKey);
+    lastExecutionTime = now;
+    
     await checkAndExecuteTasks('after_ai');
     chatJustChanged = isNewChat = false;
 }
@@ -145,17 +205,59 @@ async function onUserMessage() {
     chatJustChanged = isNewChat = false;
 }
 
-// 处理聊天切换事件
+// 添加消息删除事件处理
+function onMessageDeleted(data) {
+    console.debug('[Tasks] 消息被删除，清理处理状态');
+    
+    // 清理processedMessages中相关的记录
+    const settings = getSettings();
+    const chatId = getContext().chatId;
+    
+    // 保留当前聊天的有效消息记录
+    const validMessageKeys = [];
+    for (let i = 0; i < chat.length; i++) {
+        validMessageKeys.push(`${chatId}_${i}`);
+        validMessageKeys.push(`${chatId}_user_${i}`);
+    }
+    
+    // 过滤掉无效的消息记录
+    settings.processedMessages = settings.processedMessages.filter(key => {
+        if (key.startsWith(`${chatId}_`)) {
+            return validMessageKeys.some(validKey => key.startsWith(validKey));
+        }
+        return true; // 保留其他聊天的记录
+    });
+    
+    saveSettingsDebounced();
+}
+
+// 改进的聊天切换处理
 function onChatChanged(chatId) {
+    console.debug(`[Tasks] 聊天切换到: ${chatId}`);
+    
     chatJustChanged = true;
     isNewChat = lastChatId !== chatId && chat.length <= 1;
     lastChatId = chatId;
     lastTurnCount = 0;
-    getSettings().processedMessages = [];
+    
+    // 重置执行状态
+    isExecutingTask = false;
+    isCommandGenerated = false;
+    lastExecutionTime = 0;
+    
+    // 清理当前聊天的处理记录
+    const settings = getSettings();
+    settings.processedMessages = settings.processedMessages.filter(key => 
+        !key.startsWith(`${chatId}_`)
+    );
     saveSettingsDebounced();
+    
     checkEmbeddedTasks();
     refreshTaskLists();
-    setTimeout(() => { chatJustChanged = isNewChat = false; }, 2000);
+    
+    setTimeout(() => { 
+        chatJustChanged = isNewChat = false; 
+    }, 2000);
 }
 
 // 创建任务UI项
@@ -387,6 +489,14 @@ async function importCharacterTasks(file) {
     }
 }
 
+// 添加手动清理功能
+function clearProcessedMessages() {
+    const settings = getSettings();
+    settings.processedMessages = [];
+    saveSettingsDebounced();
+    console.log('[Tasks] 已清理所有处理记录');
+}
+
 // 全局API - 根据名称执行任务
 window.executeScheduledTaskByName = async (name) => {
     if (!name?.trim()) throw new Error('請提供任務名稱');
@@ -422,6 +532,9 @@ window.setScheduledTaskInterval = async (name, interval) => {
     }
     throw new Error(`找不到名為 "${name}" 的任務`);
 };
+
+// 导出清理函数供调试使用
+window.clearTasksProcessedMessages = clearProcessedMessages;
 
 // 注册斜杠命令
 function registerSlashCommands() {
@@ -508,6 +621,15 @@ function initTasks() {
     eventSource.on(event_types.USER_MESSAGE_RENDERED, onUserMessage);
     eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
     
+    // 添加消息删除事件监听
+    eventSource.on(event_types.MESSAGE_DELETED, onMessageDeleted);
+    eventSource.on(event_types.MESSAGE_SWIPED, () => {
+        // 消息滑动时也清理状态
+        console.debug('[Tasks] 消息滑动，重置执行状态');
+        isExecutingTask = false;
+        isCommandGenerated = false;
+    });
+    
     // 处理角色删除事件
     eventSource.on(event_types.CHARACTER_DELETED, ({ character }) => {
         const avatar = character?.avatar;
@@ -528,6 +650,9 @@ function initTasks() {
     setTimeout(() => {
         checkEmbeddedTasks();
     }, 1000);
+    
+    console.log('[Tasks] 插件初始化完成');
 }
 
 export { initTasks };
+
