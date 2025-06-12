@@ -1,16 +1,25 @@
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced } from "../../../../script.js";
+import { statsTracker } from "./statsTracker.js";
+import { initTasks } from "./scheduledTasks.js";
 
 const EXT_ID = "LittleWhiteBox";
 const EXT_NAME = "小白X";
+const MODULE_NAME = "xiaobaix-memory";
+const extensionFolderPath = `scripts/extensions/third-party/${EXT_ID}`;
 
+// 初始化插件设置
 extension_settings[EXT_ID] = extension_settings[EXT_ID] || {
     enabled: true,
-    sandboxMode: false
+    sandboxMode: false,
+    memoryEnabled: true,
+    memoryInjectEnabled: true,
+    memoryInjectDepth: 2
 };
 
 const settings = extension_settings[EXT_ID];
 
+// 辅助函数
 async function waitForElement(selector, root = document, timeout = 10000) {
     const start = Date.now();
     while (Date.now() - start < timeout) {
@@ -25,6 +34,7 @@ function generateUniqueId() {
     return `xiaobaix-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 }
 
+// 内容渲染逻辑
 function shouldRenderContent(content, className) {
     if (!content || typeof content !== 'string') return false;
     
@@ -154,6 +164,7 @@ function createIframeApi() {
     `;
 }
 
+// 斜杠命令执行
 async function executeSlashCommand(command) {
     try {
         if (!command) return { error: "命令为空" };
@@ -201,6 +212,7 @@ async function executeSlashCommand(command) {
     }
 }
 
+// iframe 通信处理
 function handleIframeMessage(event) {
     if (!event.data || event.data.source !== 'xiaobaix-iframe') return;
     
@@ -248,6 +260,7 @@ async function handleCommandMessage(source, data) {
     }
 }
 
+// HTML 渲染
 function renderHtmlInIframe(htmlContent, container, codeBlock) {
     try {
         const iframeId = generateUniqueId();
@@ -287,7 +300,6 @@ function renderHtmlInIframe(htmlContent, container, codeBlock) {
         
         return iframe;
     } catch (err) {
-        console.error('[小白X] 渲染失败:', err);
         return null;
     }
 }
@@ -340,6 +352,7 @@ ${htmlContent}
 </html>`;
 }
 
+// 代码块处理
 function processCodeBlocks(messageElement) {
     if (!settings.enabled) return;
     
@@ -362,79 +375,203 @@ function processCodeBlocks(messageElement) {
     } catch (err) {}
 }
 
+// 设置面板
 async function setupSettings() {
     try {
         const settingsContainer = await waitForElement("#extensions_settings");
         if (!settingsContainer) return;
-        const settingsHtml = `
-        <div class="inline-drawer">
-            <div class="inline-drawer-toggle inline-drawer-header">
-                <b>小白X</b>
-                <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-            </div>
-            <div class="inline-drawer-content">
-                <div class="flex-container">
-                    <input type="checkbox" id="xiaobaix_enabled" ${settings.enabled ? 'checked' : ''} />
-                    <label for="xiaobaix_enabled">启用小白X</label>
-                </div>
-                
-                <div class="flex-container">
-                    <input type="checkbox" id="xiaobaix_sandbox" ${settings.sandboxMode ? 'checked' : ''} />
-                    <label for="xiaobaix_sandbox">沙盒模式</label>
-                </div>
-                
-                <hr class="sysHR" />
-                
-                <div style="font-size:0.9em; opacity:0.8; margin-top:10px;">
-                    <p><b>功能说明：</b></p>
-                    <p>1. 渲染被\`\`\`包裹的代码块内容为交互式界面</p>
-                    <p>2. 提供<code>STscript(command)</code>函数执行酒馆命令</p>
-                    <br>
-                    <p><b>使用示例：</b></p>
-                    <pre style="background: #2a2a2a; padding: 10px; border-radius: 4px;">
-// 获取变量
-const hp = await STscript('/getvar 生命值');
-// 设置变量
-await STscript('/setvar key=生命值 100');
-// 发送消息
-await STscript('/sendas name={{char}} 你好！');
-// 显示提示
-await STscript('/echo 操作完成！');</pre>
-                </div>
-            </div>
-        </div>`;
-
+        
+        const response = await fetch(`${extensionFolderPath}/settings.html`);
+        const settingsHtml = await response.text();
+        
         $(settingsContainer).append(settingsHtml);
 
-        $("#xiaobaix_enabled").on("change", function() {
+        $("#xiaobaix_enabled").prop("checked", settings.enabled).on("change", function() {
             settings.enabled = !!$(this).prop("checked");
             saveSettingsDebounced();
         });
         
-        $("#xiaobaix_sandbox").on("change", function() {
+        $("#xiaobaix_sandbox").prop("checked", settings.sandboxMode).on("change", function() {
             settings.sandboxMode = !!$(this).prop("checked");
             saveSettingsDebounced();
+        });
+
+        $("#xiaobaix_memory_enabled").prop("checked", settings.memoryEnabled).on("change", function() {
+            settings.memoryEnabled = !!$(this).prop("checked");
+            saveSettingsDebounced();
+            
+            if (settings.memoryEnabled && settings.memoryInjectEnabled) {
+                statsTracker.updateMemoryPrompt();
+            } else if (!settings.memoryEnabled) {
+                statsTracker.removeMemoryPrompt();
+            }
+        });
+        
+        $("#xiaobaix_memory_inject").prop("checked", settings.memoryInjectEnabled).on("change", function() {
+            settings.memoryInjectEnabled = !!$(this).prop("checked");
+            saveSettingsDebounced();
+            
+            if (settings.memoryEnabled && settings.memoryInjectEnabled) {
+                statsTracker.updateMemoryPrompt();
+            } else {
+                statsTracker.removeMemoryPrompt();
+            }
+        });
+        
+        $("#xiaobaix_memory_depth").val(settings.memoryInjectDepth).on("change", function() {
+            settings.memoryInjectDepth = parseInt($(this).val()) || 2;
+            saveSettingsDebounced();
+
+            if (settings.memoryEnabled && settings.memoryInjectEnabled) {
+                statsTracker.updateMemoryPrompt();
+            }
         });
     } catch (err) {}
 }
 
+// 设置菜单标籤切换功能
+function setupMenuTabs() {
+    console.log('Setting up menu tabs...');
+
+    // 为菜单标籤添加点击事件
+    $(document).on('click', '.menu-tab', function() {
+        console.log('Menu tab clicked:', $(this).attr('data-target'));
+        const targetId = $(this).attr('data-target');
+
+        // 移除所有活动状态
+        $('.menu-tab').removeClass('active');
+
+        // 隐藏所有设置区域
+        $('.settings-section').hide();
+
+        // 激活当前标籤
+        $(this).addClass('active');
+
+        // 显示对应的设置区域
+        $('.' + targetId).show();
+    });
+
+    // 设置默认状态：显示小白X区域，隐藏其他区域
+    setTimeout(() => {
+        console.log('Setting default tab state...');
+        const jsMemorySection = $('.js-memory');
+        const taskSection = $('.task');
+        const instructionsSection = $('.instructions');
+        const jsMemoryTab = $('.menu-tab[data-target="js-memory"]');
+        const taskTab = $('.menu-tab[data-target="task"]');
+        const instructionsTab = $('.menu-tab[data-target="instructions"]');
+
+        console.log('Found elements:', {
+            jsMemorySection: jsMemorySection.length,
+            taskSection: taskSection.length,
+            instructionsSection: instructionsSection.length,
+            jsMemoryTab: jsMemoryTab.length,
+            taskTab: taskTab.length,
+            instructionsTab: instructionsTab.length
+        });
+
+        if (jsMemorySection.length && taskSection.length && instructionsSection.length) {
+            // 显示小白X，隐藏其他
+            jsMemorySection.show();
+            taskSection.hide();
+            instructionsSection.hide();
+
+            // 设置活动标籤
+            jsMemoryTab.addClass('active');
+            taskTab.removeClass('active');
+            instructionsTab.removeClass('active');
+            console.log('Default state set successfully');
+        } else {
+            console.log('Some elements not found, retrying...');
+            // 如果元素还没有准备好，再试一次
+            setTimeout(() => {
+                $('.js-memory').show();
+                $('.task').hide();
+                $('.instructions').hide();
+                $('.menu-tab[data-target="js-memory"]').addClass('active');
+                $('.menu-tab[data-target="task"]').removeClass('active');
+                $('.menu-tab[data-target="instructions"]').removeClass('active');
+            }, 500);
+        }
+    }, 300);
+}
+
+// 事件监听
 function setupEventListeners() {
     const { eventSource, event_types } = getContext();
     
+    eventSource.on(event_types.MESSAGE_RECEIVED, onMessageComplete);
     eventSource.on(event_types.USER_MESSAGE_RENDERED, onMessageRendered);
     eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, onMessageRendered);
+    eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
     
     window.addEventListener('message', handleIframeMessage);
     
-    function onMessageRendered(_, messageId) {
+    async function onMessageComplete(data) {
+        if (!settings.enabled || !settings.memoryEnabled) return;
+        
+        setTimeout(async () => {
+            const messageId = typeof data === 'object' ? data.messageId : data;
+            
+            if (!messageId) return;
+            
+            const messageElement = document.querySelector(`div.mes[mesid="${messageId}"] .mes_text`);
+            if (messageElement) {
+                const messageText = messageElement.textContent || '';
+                const characterName = statsTracker.getCharacterFromMessage(messageElement);
+                await statsTracker.updateStatisticsForNewMessage(messageText, characterName);
+                
+                const memoryButton = $(`.mes[mesid="${messageId}"] .memory-button`);
+                if (memoryButton.length) {
+                    memoryButton.addClass('has-memory');
+                }
+            }
+        }, 300);
+    }
+    
+    async function onMessageRendered(data) {
         if (!settings.enabled) return;
         
-        setTimeout(() => {
+        setTimeout(async () => {
+            const messageId = data.messageId;
             const messageElement = document.querySelector(`div.mes[mesid="${messageId}"] .mes_text`);
             if (messageElement) {
                 processCodeBlocks(messageElement);
+                
+                if (settings.memoryEnabled) {
+                    statsTracker.addMemoryButtonToMessage(messageId);
+                }
             }
-        }, 50);
+        }, 100);
+    }
+    
+    async function onChatChanged() {
+        if (!settings.memoryEnabled) return;
+        
+        try {
+            setTimeout(async () => {
+                let stats = await executeSlashCommand('/getvar xiaobaix_stats');
+                
+                if (!stats || stats === "undefined") {
+                    const messages = await statsTracker.processMessageHistory();
+                    if (messages && messages.length > 0) {
+                        const newStats = statsTracker.createEmptyStats();
+                        
+                        for (const message of messages) {
+                            statsTracker.updateStatsFromText(newStats, message.content, message.name);
+                        }
+                        
+                        await executeSlashCommand(`/setvar key=xiaobaix_stats ${JSON.stringify(newStats)}`);
+                        
+                        if (settings.memoryInjectEnabled) {
+                            statsTracker.updateMemoryPrompt();
+                        }
+                    }
+                } else if (settings.memoryInjectEnabled) {
+                    statsTracker.updateMemoryPrompt();
+                }
+            }, 500);
+        } catch (error) {}
     }
 }
 
@@ -445,38 +582,65 @@ function processExistingMessages() {
     messages.forEach(message => {
         processCodeBlocks(message);
     });
-}
 
-function addStyles() {
-    const styleElement = document.createElement('style');
-    styleElement.textContent = `
-        .xiaobaix-iframe {
-            transition: height 0.3s ease;
-        }
-        
-        pre:has(+ .xiaobaix-iframe) {
-            display: none;
-        }
-    `;
-    document.head.appendChild(styleElement);
+    if (settings.memoryEnabled) {
+        $('#chat .mes').each(function() {
+            const messageId = $(this).attr('mesid');
+            if (messageId) {
+                statsTracker.addMemoryButtonToMessage(messageId);
+            }
+        });
+    }
 }
 
 async function initExtension() {
     try {
-        console.log('[小白X] 初始化中...');
+        const response = await fetch(`${extensionFolderPath}/style.css`);
+        const styleText = await response.text();
         
-        addStyles();
+        const styleElement = document.createElement('style');
+        styleElement.textContent = styleText;
+        document.head.appendChild(styleElement);
+        
+        // 初始化统计追踪器
+        statsTracker.init(EXT_ID, MODULE_NAME, settings, executeSlashCommand);
+        
         await setupSettings();
         setupEventListeners();
+        initTasks();
+
+        // 确保菜单切换在所有初始化完成后设置
+        setTimeout(() => {
+            setupMenuTabs();
+        }, 500);
         
-        setTimeout(processExistingMessages, 1000);
+        setTimeout(async () => {
+            processExistingMessages();
+            
+            if (settings.memoryEnabled) {
+                const messages = await statsTracker.processMessageHistory();
+                if (messages && messages.length > 0) {
+                    const stats = statsTracker.createEmptyStats();
+                    
+                    for (const message of messages) {
+                        statsTracker.updateStatsFromText(stats, message.content, message.name);
+                    }
+                    
+                    await executeSlashCommand(`/setvar key=xiaobaix_stats ${JSON.stringify(stats)}`);
+                    
+                    if (settings.memoryInjectEnabled) {
+                        statsTracker.updateMemoryPrompt();
+                    }
+                }
+            }
+        }, 1000);
         
         setInterval(processExistingMessages, 5000);
-        
-        console.log('[小白X] 初始化完成！');
-    } catch (err) {
-        console.error('[小白X] 初始化失败:', err);
-    }
+    } catch (err) {}
 }
 
+// 导出执行命令函数给其他模块使用
+export { executeSlashCommand };
+
+// 初始化插件
 initExtension();
