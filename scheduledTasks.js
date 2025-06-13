@@ -146,12 +146,18 @@ async function checkAndExecuteTasks(triggerContext = 'after_ai', overrideChatCha
 }
 
 // 事件处理
+// 在onMessageReceived函数中添加swipe检测
 async function onMessageReceived(messageId) {
     const settings = getSettings();
     if (!settings.enabled || typeof messageId !== 'number' || messageId < 0 || messageId >= chat.length) return;
     
     const message = chat[messageId];
     if (!message || message.is_user || message.is_system || message.mes === '...' || isCommandGenerated || isExecutingTask) return;
+    
+    if (message.swipe_id !== undefined && message.swipe_id > 0) {
+        console.debug('[Tasks] 跳过swipe消息，不触发任务');
+        return;
+    }
     
     const messageKey = `${getContext().chatId}_${messageId}`;
     if (isMessageProcessed(messageKey)) return;
@@ -160,6 +166,7 @@ async function onMessageReceived(messageId) {
     await checkAndExecuteTasks('after_ai');
     chatJustChanged = isNewChat = false;
 }
+
 
 async function onUserMessage() {
     const settings = getSettings();
