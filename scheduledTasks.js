@@ -7,26 +7,86 @@ import { ARGUMENT_TYPE, SlashCommandArgument } from "../../../slash-commands/Sla
 import { callPopup } from "../../../../script.js";
 import { callGenericPopup, POPUP_TYPE } from "../../../popup.js";
 import { accountStorage } from "../../../util/AccountStorage.js";
-import { download, getFileText, uuidv4 } from "../../../utils.js";
+import { download, getFileText, uuidv4, debounce } from "../../../utils.js";
 import { executeSlashCommand } from "./index.js";
 
 const TASKS_MODULE_NAME = "xiaobaix-tasks";
 const EXT_ID = "LittleWhiteBox";
-const defaultSettings = { enabled: false, globalTasks: [], processedMessages: [], character_allowed_tasks: [] };
+const defaultSettings = { 
+    enabled: false, 
+    globalTasks: [], 
+    processedMessages: [], 
+    character_allowed_tasks: [] 
+};
 
-let currentEditingTask = null, currentEditingIndex = -1, lastChatId = null, chatJustChanged = false, isNewChat = false, lastTurnCount = 0;
-let isExecutingTask = false, isCommandGenerated = false;
+// 优化后的常量设置
+const MAX_PROCESSED_MESSAGES = 20;  // 减少内存占用
+const MAX_COOLDOWN_ENTRIES = 10;    // 限制冷却记录
+const CLEANUP_INTERVAL = 30000;     // 30秒清理间隔
 const TASK_COOLDOWN = 3000;
-const taskLastExecutionTime = new Map();
+const DEBOUNCE_DELAY = 1000;        // 增加防抖延迟
+
+// 全局变量
+let currentEditingTask = null;
+let currentEditingIndex = -1;
+let lastChatId = null;
+let chatJustChanged = false;
+let isNewChat = false;
+let lastTurnCount = 0;
+let isExecutingTask = false;
+let isCommandGenerated = false;
+let taskLastExecutionTime = new Map();
+let cleanupTimer = null;
+let lastTasksHash = '';
+
+// 优化的防抖保存
+const debouncedSave = debounce(() => {
+    saveSettingsDebounced();
+}, DEBOUNCE_DELAY);
 
 // 获取并初始化设置
 function getSettings() {
-    if (!extension_settings[EXT_ID].tasks) extension_settings[EXT_ID].tasks = structuredClone(defaultSettings);
+    if (!extension_settings[EXT_ID].tasks) {
+        extension_settings[EXT_ID].tasks = structuredClone(defaultSettings);
+    }
     const settings = extension_settings[EXT_ID].tasks;
     Object.keys(defaultSettings).forEach(key => {
         if (settings[key] === undefined) settings[key] = defaultSettings[key];
     });
     return settings;
+}
+
+// 定期清理内存
+function scheduleCleanup() {
+    if (cleanupTimer) return;
+    
+    cleanupTimer = setInterval(() => {
+        // 清理过期的冷却记录
+        const now = Date.now();
+        for (const [taskName, lastTime] of taskLastExecutionTime.entries()) {
+            if (now - lastTime > TASK_COOLDOWN * 2) {
+                taskLastExecutionTime.delete(taskName);
+            }
+        }
+        
+        // 限制冷却记录数量
+        if (taskLastExecutionTime.size > MAX_COOLDOWN_ENTRIES) {
+            const entries = Array.from(taskLastExecutionTime.entries());
+            entries.sort((a, b) => b[1] - a[1]);
+            taskLastExecutionTime.clear();
+            entries.slice(0, MAX_COOLDOWN_ENTRIES).forEach(([name, time]) => {
+                taskLastExecutionTime.set(name, time);
+            });
+        }
+        
+        // 清理过期消息记录
+        const settings = getSettings();
+        if (settings.processedMessages.length > MAX_PROCESSED_MESSAGES) {
+            settings.processedMessages = settings.processedMessages.slice(-MAX_PROCESSED_MESSAGES);
+            debouncedSave();
+        }
+        
+    }, CLEANUP_INTERVAL);
 }
 
 // 冷却管理
@@ -39,18 +99,23 @@ function setTaskCooldown(taskName) {
     taskLastExecutionTime.set(taskName, Date.now());
 }
 
-// 消息处理状态管理
+// 优化的消息处理状态管理
 function isMessageProcessed(messageKey) { 
     return getSettings().processedMessages.includes(messageKey); 
 }
 
 function markMessageAsProcessed(messageKey) {
     const settings = getSettings();
-    if (!settings.processedMessages.includes(messageKey)) {
-        settings.processedMessages.push(messageKey);
-        if (settings.processedMessages.length > 100) settings.processedMessages = settings.processedMessages.slice(-50);
-        saveSettingsDebounced();
+    if (settings.processedMessages.includes(messageKey)) return;
+    
+    settings.processedMessages.push(messageKey);
+    
+    // 立即清理，避免内存过度使用
+    if (settings.processedMessages.length > MAX_PROCESSED_MESSAGES) {
+        settings.processedMessages = settings.processedMessages.slice(-Math.floor(MAX_PROCESSED_MESSAGES/2));
     }
+    
+    debouncedSave();
 }
 
 // 角色任务管理
@@ -73,7 +138,7 @@ async function saveCharacterTasks(tasks) {
     if (avatar && !settings.character_allowed_tasks?.includes(avatar)) {
         if (!settings.character_allowed_tasks) settings.character_allowed_tasks = [];
         settings.character_allowed_tasks.push(avatar);
-        saveSettingsDebounced();
+        debouncedSave();
     }
 }
 
@@ -97,9 +162,15 @@ function calculateFloorByType(floorType) {
     if (!Array.isArray(chat) || chat.length === 0) return 0;
     let count = 0;
     switch (floorType) {
-        case 'user': count = Math.max(0, chat.filter(msg => msg.is_user && !msg.is_system).length - 1); break;
-        case 'llm': count = Math.max(0, chat.filter(msg => !msg.is_user && !msg.is_system).length - 1); break;
-        default: count = Math.max(0, chat.length - 1); break;
+        case 'user': 
+            count = Math.max(0, chat.filter(msg => msg.is_user && !msg.is_system).length - 1); 
+            break;
+        case 'llm': 
+            count = Math.max(0, chat.filter(msg => !msg.is_user && !msg.is_system).length - 1); 
+            break;
+        default: 
+            count = Math.max(0, chat.length - 1); 
+            break;
     }
     return count;
 }
@@ -111,53 +182,62 @@ function calculateTurnCount() {
     return Math.min(userMessages, aiMessages);
 }
 
-// 任务执行检查
+// 优化的任务执行检查
 async function checkAndExecuteTasks(triggerContext = 'after_ai', overrideChatChanged = null, overrideNewChat = null) {
     const settings = getSettings();
-    if (!settings.enabled || (overrideChatChanged ?? chatJustChanged) || (overrideNewChat ?? isNewChat) || isExecutingTask) return;
+    if (!settings.enabled || (overrideChatChanged ?? chatJustChanged) || 
+        (overrideNewChat ?? isNewChat) || isExecutingTask) return;
     
+    // 合并任务列表，减少重复操作
     const allTasks = [...settings.globalTasks, ...getCharacterTasks()];
-    const executedTasksInThisCheck = [];
+    if (allTasks.length === 0) return;
     
-    for (const task of allTasks) {
-        if (task.disabled || task.interval <= 0 || isTaskInCooldown(task.name) || executedTasksInThisCheck.includes(task.name)) continue;
+    const now = Date.now();
+    const currentTurnCount = calculateTurnCount();
+    
+    // 批量检查，减少单独处理
+    const tasksToExecute = allTasks.filter(task => {
+        if (task.disabled || task.interval <= 0) return false;
+        
+        const lastExecution = taskLastExecutionTime.get(task.name);
+        if (lastExecution && (now - lastExecution) < TASK_COOLDOWN) return false;
         
         const taskTriggerTiming = task.triggerTiming || 'after_ai';
-        let shouldExecute = false;
-
-        if (taskTriggerTiming === 'per_turn') {
-            if (triggerContext !== 'after_ai') continue;
-            const currentTurnCount = calculateTurnCount();
-            if (currentTurnCount > lastTurnCount && currentTurnCount % task.interval === 0) shouldExecute = true;
-        } else {
-            if (taskTriggerTiming !== triggerContext) continue;
-            const currentFloor = calculateFloorByType(task.floorType || 'all');
-            if (currentFloor % task.interval === 0 && currentFloor > 0) shouldExecute = true;
-        }
+        if (taskTriggerTiming !== triggerContext && taskTriggerTiming !== 'per_turn') return false;
         
-        if (shouldExecute) {
-            setTaskCooldown(task.name);
-            executedTasksInThisCheck.push(task.name);
-            await executeCommands(task.commands, task.name);
+        if (taskTriggerTiming === 'per_turn') {
+            return triggerContext === 'after_ai' && currentTurnCount > lastTurnCount && currentTurnCount % task.interval === 0;
+        } else {
+            const currentFloor = calculateFloorByType(task.floorType || 'all');
+            return currentFloor % task.interval === 0 && currentFloor > 0;
         }
+    });
+    
+    // 批量执行
+    for (const task of tasksToExecute) {
+        taskLastExecutionTime.set(task.name, now);
+        await executeCommands(task.commands, task.name);
     }
-
-    if (triggerContext === 'after_ai') lastTurnCount = calculateTurnCount();
+    
+    if (triggerContext === 'after_ai') lastTurnCount = currentTurnCount;
 }
 
-// 事件处理
-// 在onMessageReceived函数中添加swipe检测
+// 优化的事件处理
 async function onMessageReceived(messageId) {
-    const settings = getSettings();
-    if (!settings.enabled || typeof messageId !== 'number' || messageId < 0 || messageId >= chat.length) return;
+    if (typeof messageId !== 'number' || messageId < 0 || !chat[messageId]) return;
     
     const message = chat[messageId];
-    if (!message || message.is_user || message.is_system || message.mes === '...' || isCommandGenerated || isExecutingTask) return;
+    if (message.is_user || message.is_system || message.mes === '...' || 
+        isCommandGenerated || isExecutingTask) return;
     
+    // 简化swipe检测
     if (message.swipe_id !== undefined && message.swipe_id > 0) {
         console.debug('[Tasks] 跳过swipe消息，不触发任务');
         return;
     }
+    
+    const settings = getSettings();
+    if (!settings.enabled) return;
     
     const messageKey = `${getContext().chatId}_${messageId}`;
     if (isMessageProcessed(messageKey)) return;
@@ -166,7 +246,6 @@ async function onMessageReceived(messageId) {
     await checkAndExecuteTasks('after_ai');
     chatJustChanged = isNewChat = false;
 }
-
 
 async function onUserMessage() {
     const settings = getSettings();
@@ -187,10 +266,12 @@ function onMessageDeleted(data) {
         validMessageKeys.push(`${chatId}_user_${i}`);
     }
     settings.processedMessages = settings.processedMessages.filter(key => {
-        if (key.startsWith(`${chatId}_`)) return validMessageKeys.some(validKey => key.startsWith(validKey));
+        if (key.startsWith(`${chatId}_`)) {
+            return validMessageKeys.some(validKey => key.startsWith(validKey));
+        }
         return true;
     });
-    saveSettingsDebounced();
+    debouncedSave();
 }
 
 function onChatChanged(chatId) {
@@ -204,14 +285,21 @@ function onChatChanged(chatId) {
     
     const settings = getSettings();
     settings.processedMessages = settings.processedMessages.filter(key => !key.startsWith(`${chatId}_`));
-    saveSettingsDebounced();
+    debouncedSave();
     
     checkEmbeddedTasks();
     refreshTaskLists();
     setTimeout(() => { chatJustChanged = isNewChat = false; }, 2000);
 }
 
-// UI管理
+// 优化的UI管理
+function getTasksHash() {
+    const allTasks = [...getSettings().globalTasks, ...getCharacterTasks()];
+    return allTasks.map(t => 
+        `${t.id}_${t.disabled}_${t.name}_${t.interval}_${t.floorType}_${t.triggerTiming}_${t.commands}`
+    ).join('|');
+}
+
 function createTaskItem(task, index, isCharacterTask = false) {
     if (!task.id) task.id = `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const taskType = isCharacterTask ? 'character' : 'global';
@@ -225,7 +313,11 @@ function createTaskItem(task, index, isCharacterTask = false) {
     taskElement.find('.disable_task').attr('id', `task_disable_${task.id}`).prop('checked', task.disabled);
     taskElement.find('label.checkbox').attr('for', `task_disable_${task.id}`);
 
-    taskElement.find('.disable_task').on('input', () => { task.disabled = taskElement.find('.disable_task').prop('checked'); saveTask(task, index, isCharacterTask); });
+    // 使用事件委托减少内存占用
+    taskElement.find('.disable_task').on('input', () => { 
+        task.disabled = taskElement.find('.disable_task').prop('checked'); 
+        saveTask(task, index, isCharacterTask); 
+    });
     taskElement.find('.test_task').on('click', () => testTask(index, taskType));
     taskElement.find('.edit_task').on('click', () => editTask(index, taskType));
     taskElement.find('.delete_task').on('click', () => deleteTask(index, taskType));
@@ -233,9 +325,26 @@ function createTaskItem(task, index, isCharacterTask = false) {
 }
 
 function refreshTaskLists() {
-    $('#global_tasks_list, #character_tasks_list').empty();
-    getSettings().globalTasks.forEach((task, i) => $('#global_tasks_list').append(createTaskItem(task, i, false)));
-    getCharacterTasks().forEach((task, i) => $('#character_tasks_list').append(createTaskItem(task, i, true)));
+    const currentHash = getTasksHash();
+    if (currentHash === lastTasksHash) return; // 无变化则跳过
+    
+    lastTasksHash = currentHash;
+    
+    const $globalList = $('#global_tasks_list');
+    const $charList = $('#character_tasks_list');
+    const globalTasks = getSettings().globalTasks;
+    const characterTasks = getCharacterTasks();
+    
+    // 总是重建DOM以确保显示最新内容
+    $globalList.empty();
+    globalTasks.forEach((task, i) => 
+        $globalList.append(createTaskItem(task, i, false))
+    );
+    
+    $charList.empty();
+    characterTasks.forEach((task, i) => 
+        $charList.append(createTaskItem(task, i, true))
+    );
 }
 
 function showTaskEditor(task = null, isEdit = false, isCharacterTask = false) {
@@ -278,7 +387,7 @@ function saveTaskFromEditor(task, isCharacterTask) {
         const settings = getSettings();
         if (currentEditingIndex >= 0) settings.globalTasks[currentEditingIndex] = task;
         else settings.globalTasks.push(task);
-        saveSettingsDebounced();
+        debouncedSave();
     }
     refreshTaskLists();
 }
@@ -286,7 +395,11 @@ function saveTaskFromEditor(task, isCharacterTask) {
 function saveTask(task, index, isCharacterTask) {
     const tasks = isCharacterTask ? getCharacterTasks() : getSettings().globalTasks;
     if (index >= 0 && index < tasks.length) tasks[index] = task;
-    isCharacterTask ? saveCharacterTasks(tasks) : saveSettingsDebounced();
+    if (isCharacterTask) {
+        saveCharacterTasks(tasks);
+    } else {
+        debouncedSave();
+    }
     refreshTaskLists();
 }
 
@@ -328,7 +441,7 @@ function deleteTask(index, type) {
             saveCharacterTasks(tasks);
         } else {
             getSettings().globalTasks.splice(index, 1);
-            saveSettingsDebounced();
+            debouncedSave();
         }
         refreshTaskLists();
     });
@@ -352,7 +465,9 @@ async function testAllTasks() {
 }
 
 function getAllTaskNames() {
-    return [...getSettings().globalTasks, ...getCharacterTasks()].filter(t => !t.disabled).map(t => t.name);
+    return [...getSettings().globalTasks, ...getCharacterTasks()]
+        .filter(t => !t.disabled)
+        .map(t => t.name);
 }
 
 // 嵌入任务检查
@@ -388,7 +503,7 @@ async function checkEmbeddedTasks() {
                 }
                 if (result) {
                     settings.character_allowed_tasks.push(avatar);
-                    saveSettingsDebounced();
+                    debouncedSave();
                 }
             }
         }
@@ -413,7 +528,11 @@ async function importCharacterTasks(file) {
         const fileText = await getFileText(file);
         const importData = JSON.parse(fileText);
         if (!Array.isArray(importData.tasks)) throw new Error('无效的任务文件格式');
-        const tasksToImport = importData.tasks.map(task => ({ ...task, id: uuidv4(), importedAt: new Date().toISOString() }));
+        const tasksToImport = importData.tasks.map(task => ({ 
+            ...task, 
+            id: uuidv4(), 
+            importedAt: new Date().toISOString() 
+        }));
         await saveCharacterTasks([...getCharacterTasks(), ...tasksToImport]);
         refreshTaskLists();
     } catch (error) {
@@ -424,7 +543,7 @@ async function importCharacterTasks(file) {
 // 工具函数
 function clearProcessedMessages() {
     getSettings().processedMessages = [];
-    saveSettingsDebounced();
+    debouncedSave();
 }
 
 function clearTaskCooldown(taskName = null) {
@@ -436,15 +555,51 @@ function getTaskCooldownStatus() {
     const status = {};
     for (const [taskName, lastTime] of taskLastExecutionTime.entries()) {
         const remaining = Math.max(0, TASK_COOLDOWN - (Date.now() - lastTime));
-        status[taskName] = { lastExecutionTime: lastTime, remainingCooldown: remaining, isInCooldown: remaining > 0 };
+        status[taskName] = { 
+            lastExecutionTime: lastTime, 
+            remainingCooldown: remaining, 
+            isInCooldown: remaining > 0 
+        };
     }
     return status;
+}
+
+// 内存监控
+function getMemoryUsage() {
+    return {
+        processedMessages: getSettings().processedMessages.length,
+        taskCooldowns: taskLastExecutionTime.size,
+        globalTasks: getSettings().globalTasks.length,
+        characterTasks: getCharacterTasks().length,
+        maxProcessedMessages: MAX_PROCESSED_MESSAGES,
+        maxCooldownEntries: MAX_COOLDOWN_ENTRIES
+    };
+}
+
+// 资源清理
+function cleanup() {
+    if (cleanupTimer) {
+        clearInterval(cleanupTimer);
+        cleanupTimer = null;
+    }
+    taskLastExecutionTime.clear();
+    
+    // 清理事件监听器
+    eventSource.off(event_types.MESSAGE_RECEIVED, onMessageReceived);
+    eventSource.off(event_types.USER_MESSAGE_RENDERED, onUserMessage);
+    eventSource.off(event_types.CHAT_CHANGED, onChatChanged);
+    eventSource.off(event_types.MESSAGE_DELETED, onMessageDeleted);
+    eventSource.off(event_types.MESSAGE_SWIPED);
+    eventSource.off(event_types.CHARACTER_DELETED);
+    
+    $(window).off('beforeunload', cleanup);
 }
 
 // 全局API
 window.executeScheduledTaskByName = async (name) => {
     if (!name?.trim()) throw new Error('请提供任务名称');
-    const task = [...getSettings().globalTasks, ...getCharacterTasks()].find(t => t.name.toLowerCase() === name.toLowerCase());
+    const task = [...getSettings().globalTasks, ...getCharacterTasks()]
+        .find(t => t.name.toLowerCase() === name.toLowerCase());
     if (!task) throw new Error(`找不到名为 "${name}" 的任务`);
     if (task.disabled) throw new Error(`任务 "${name}" 已被禁用`);
     if (isTaskInCooldown(task.name)) {
@@ -459,13 +614,15 @@ window.executeScheduledTaskByName = async (name) => {
 window.setScheduledTaskInterval = async (name, interval) => {
     if (!name?.trim()) throw new Error('请提供任务名称');
     const intervalNum = parseInt(interval);
-    if (isNaN(intervalNum) || intervalNum < 0 || intervalNum > 99999) throw new Error('间隔必须是 0-99999 之间的数字');
+    if (isNaN(intervalNum) || intervalNum < 0 || intervalNum > 99999) {
+        throw new Error('间隔必须是 0-99999 之间的数字');
+    }
 
     const settings = getSettings();
     const globalTaskIndex = settings.globalTasks.findIndex(t => t.name.toLowerCase() === name.toLowerCase());
     if (globalTaskIndex !== -1) {
         settings.globalTasks[globalTaskIndex].interval = intervalNum;
-        saveSettingsDebounced();
+        debouncedSave();
         refreshTaskLists();
         return `已设置全局任务 "${name}" 的间隔为 ${intervalNum === 0 ? '手动激活' : `每${intervalNum}楼层`}`;
     }
@@ -484,6 +641,7 @@ window.setScheduledTaskInterval = async (name, interval) => {
 window.clearTasksProcessedMessages = clearProcessedMessages;
 window.clearTaskCooldown = clearTaskCooldown;
 window.getTaskCooldownStatus = getTaskCooldownStatus;
+window.getTasksMemoryUsage = getMemoryUsage;
 
 // 注册斜杠命令
 function registerSlashCommands() {
@@ -512,7 +670,9 @@ function registerSlashCommands() {
             callback: async (args, value) => {
                 const valueStr = String(value || '').trim();
                 const parts = valueStr.split(/\s+/);
-                if (!parts || parts.length < 2) return '用法: /xbset 任务名称 间隔数字\n例如: /xbset 我的任务 5\n设为0表示手动激活';
+                if (!parts || parts.length < 2) {
+                    return '用法: /xbset 任务名称 间隔数字\n例如: /xbset 我的任务 5\n设为0表示手动激活';
+                }
                 const interval = parts.pop();
                 const taskName = parts.join(' ');
                 try {
@@ -535,9 +695,18 @@ function registerSlashCommands() {
 
 // 初始化模块
 function initTasks() {
-    if (!extension_settings[EXT_ID].tasks) extension_settings[EXT_ID].tasks = structuredClone(defaultSettings);
+    // 启动内存清理定时器
+    scheduleCleanup();
     
-    $('#scheduled_tasks_enabled').on('input', e => { getSettings().enabled = $(e.target).prop('checked'); saveSettingsDebounced(); });
+    if (!extension_settings[EXT_ID].tasks) {
+        extension_settings[EXT_ID].tasks = structuredClone(defaultSettings);
+    }
+    
+    // 绑定UI事件
+    $('#scheduled_tasks_enabled').on('input', e => { 
+        getSettings().enabled = $(e.target).prop('checked'); 
+        debouncedSave(); 
+    });
     $('#add_global_task').on('click', () => showTaskEditor(null, false, false));
     $('#add_character_task').on('click', () => showTaskEditor(null, false, true));
     $('#test_all_tasks').on('click', testAllTasks);
@@ -545,17 +714,24 @@ function initTasks() {
     $('#import_character_tasks').on('click', () => $('#import_tasks_file').trigger('click'));
     $('#import_tasks_file').on('change', function(e) {
         const file = e.target.files[0];
-        if (file) { importCharacterTasks(file); $(this).val(''); }
+        if (file) { 
+            importCharacterTasks(file); 
+            $(this).val(''); 
+        }
     });
     
     $('#scheduled_tasks_enabled').prop('checked', getSettings().enabled);
     refreshTaskLists();
     
+    // 绑定事件监听器
     eventSource.on(event_types.MESSAGE_RECEIVED, onMessageReceived);
     eventSource.on(event_types.USER_MESSAGE_RENDERED, onUserMessage);
     eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
     eventSource.on(event_types.MESSAGE_DELETED, onMessageDeleted);
-    eventSource.on(event_types.MESSAGE_SWIPED, () => { isExecutingTask = false; isCommandGenerated = false; });
+    eventSource.on(event_types.MESSAGE_SWIPED, () => { 
+        isExecutingTask = false; 
+        isCommandGenerated = false; 
+    });
     eventSource.on(event_types.CHARACTER_DELETED, ({ character }) => {
         const avatar = character?.avatar;
         const settings = getSettings();
@@ -563,13 +739,18 @@ function initTasks() {
             const index = settings.character_allowed_tasks.indexOf(avatar);
             if (index !== -1) {
                 settings.character_allowed_tasks.splice(index, 1);
-                saveSettingsDebounced();
+                debouncedSave();
             }
         }
     });
     
+    // 页面卸载时清理资源
+    $(window).on('beforeunload', cleanup);
+    
     registerSlashCommands();
     setTimeout(() => { checkEmbeddedTasks(); }, 1000);
+    
+    console.log('[Tasks] 插件已加载，内存优化版本');
 }
 
 export { initTasks };
