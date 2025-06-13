@@ -2,6 +2,7 @@ import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced } from "../../../../script.js";
 import { statsTracker } from "./statsTracker.js";
 import { initTasks } from "./scheduledTasks.js";
+import { initScriptAssistant } from "./scriptAssistant.js";
 
 const EXT_ID = "LittleWhiteBox";
 const EXT_NAME = "小白X";
@@ -608,7 +609,7 @@ async function initExtension() {
         await setupSettings();
         setupEventListeners();
         initTasks();
-
+        initScriptAssistant();
         // 确保菜单切换在所有初始化完成后设置
         setTimeout(() => {
             setupMenuTabs();
