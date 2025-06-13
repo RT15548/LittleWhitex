@@ -20,11 +20,11 @@ const defaultSettings = {
 };
 
 // 优化后的常量设置
-const MAX_PROCESSED_MESSAGES = 20;  // 减少内存占用
-const MAX_COOLDOWN_ENTRIES = 10;    // 限制冷却记录
-const CLEANUP_INTERVAL = 30000;     // 30秒清理间隔
+const MAX_PROCESSED_MESSAGES = 20;
+const MAX_COOLDOWN_ENTRIES = 10;
+const CLEANUP_INTERVAL = 30000;
 const TASK_COOLDOWN = 3000;
-const DEBOUNCE_DELAY = 1000;        // 增加防抖延迟
+const DEBOUNCE_DELAY = 1000;
 
 // 全局变量
 let currentEditingTask = null;
@@ -222,7 +222,7 @@ async function checkAndExecuteTasks(triggerContext = 'after_ai', overrideChatCha
     if (triggerContext === 'after_ai') lastTurnCount = currentTurnCount;
 }
 
-// 优化的事件处理
+// 事件处理
 async function onMessageReceived(messageId) {
     if (typeof messageId !== 'number' || messageId < 0 || !chat[messageId]) return;
     
@@ -230,7 +230,6 @@ async function onMessageReceived(messageId) {
     if (message.is_user || message.is_system || message.mes === '...' || 
         isCommandGenerated || isExecutingTask) return;
     
-    // 简化swipe检测
     if (message.swipe_id !== undefined && message.swipe_id > 0) {
         console.debug('[Tasks] 跳过swipe消息，不触发任务');
         return;
@@ -239,13 +238,18 @@ async function onMessageReceived(messageId) {
     const settings = getSettings();
     if (!settings.enabled) return;
     
-    const messageKey = `${getContext().chatId}_${messageId}`;
-    if (isMessageProcessed(messageKey)) return;
+    const messageKey = `${getContext().chatId}_${messageId}_${message.send_date || Date.now()}`;
+    if (isMessageProcessed(messageKey)) {
+        console.debug(`[Tasks] 消息已处理，跳过: ${messageKey}`);
+        return;
+    }
     
+    console.log(`[Tasks] 处理新消息: ${messageKey}, 当前楼层: ${calculateFloorByType('all')}`);
     markMessageAsProcessed(messageKey);
     await checkAndExecuteTasks('after_ai');
     chatJustChanged = isNewChat = false;
 }
+
 
 async function onUserMessage() {
     const settings = getSettings();
@@ -260,19 +264,18 @@ async function onUserMessage() {
 function onMessageDeleted(data) {
     const settings = getSettings();
     const chatId = getContext().chatId;
-    const validMessageKeys = [];
-    for (let i = 0; i < chat.length; i++) {
-        validMessageKeys.push(`${chatId}_${i}`);
-        validMessageKeys.push(`${chatId}_user_${i}`);
-    }
-    settings.processedMessages = settings.processedMessages.filter(key => {
-        if (key.startsWith(`${chatId}_`)) {
-            return validMessageKeys.some(validKey => key.startsWith(validKey));
-        }
-        return true;
-    });
+    
+    settings.processedMessages = settings.processedMessages.filter(key => 
+        !key.startsWith(`${chatId}_`)
+    );
+    
+    isExecutingTask = false;
+    isCommandGenerated = false;
+    
     debouncedSave();
+    console.log('[Tasks] 消息删除后清理状态完成');
 }
+
 
 function onChatChanged(chatId) {
     chatJustChanged = true;
@@ -292,7 +295,6 @@ function onChatChanged(chatId) {
     setTimeout(() => { chatJustChanged = isNewChat = false; }, 2000);
 }
 
-// 优化的UI管理
 function getTasksHash() {
     const allTasks = [...getSettings().globalTasks, ...getCharacterTasks()];
     return allTasks.map(t => `${t.id}_${t.disabled}_${t.name}_${t.interval}`).join('|');
@@ -311,7 +313,6 @@ function createTaskItem(task, index, isCharacterTask = false) {
     taskElement.find('.disable_task').attr('id', `task_disable_${task.id}`).prop('checked', task.disabled);
     taskElement.find('label.checkbox').attr('for', `task_disable_${task.id}`);
 
-    // 使用事件委托减少内存占用
     taskElement.find('.disable_task').on('input', () => { 
         task.disabled = taskElement.find('.disable_task').prop('checked'); 
         saveTask(task, index, isCharacterTask); 
@@ -324,7 +325,7 @@ function createTaskItem(task, index, isCharacterTask = false) {
 
 function refreshTaskLists() {
     const currentHash = getTasksHash();
-    if (currentHash === lastTasksHash) return; // 无变化则跳过
+    if (currentHash === lastTasksHash) return;
     
     lastTasksHash = currentHash;
     
@@ -333,7 +334,6 @@ function refreshTaskLists() {
     const globalTasks = getSettings().globalTasks;
     const characterTasks = getCharacterTasks();
     
-    // 只在任务数量变化时重建DOM
     if ($globalList.children().length !== globalTasks.length) {
         $globalList.empty();
         globalTasks.forEach((task, i) => 
