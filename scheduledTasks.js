@@ -202,22 +202,7 @@ async function checkAndExecuteTasks(triggerContext = 'after_ai', overrideChatCha
             return triggerContext === 'after_ai' && currentTurnCount > lastTurnCount && currentTurnCount % task.interval === 0;
         } else {
             const currentFloor = calculateFloorByType(task.floorType || 'all');
-            if (currentFloor <= 0) return false;
-            
-            // 🔧 修复：使用楼层差值而不是取模，解决任务可能永远不触发的问题
-            const floorKey = `${task.name}_floor`;
-            const lastTaskFloor = taskLastExecutionTime.get(floorKey) || 0;
-            
-            // 检查是否已经过了足够的楼层间隔
-            const shouldTrigger = (currentFloor - lastTaskFloor) >= task.interval;
-            
-            if (shouldTrigger) {
-                // 记录此次触发的楼层，用于下次间隔计算
-                taskLastExecutionTime.set(floorKey, currentFloor);
-                return true;
-            }
-            
-            return false;
+            return currentFloor % task.interval === 0 && currentFloor > 0;
         }
     });
     
