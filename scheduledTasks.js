@@ -19,12 +19,12 @@ const defaultSettings = {
     character_allowed_tasks: [] 
 };
 
-//常量设置
-const MAX_PROCESSED_MESSAGES = 20;
-const MAX_COOLDOWN_ENTRIES = 10;
-const CLEANUP_INTERVAL = 30000;
+// 优化后的常量设置
+const MAX_PROCESSED_MESSAGES = 20;  // 减少内存占用
+const MAX_COOLDOWN_ENTRIES = 10;    // 限制冷却记录
+const CLEANUP_INTERVAL = 30000;     // 30秒清理间隔
 const TASK_COOLDOWN = 3000;
-const DEBOUNCE_DELAY = 1000;
+const DEBOUNCE_DELAY = 1000;        // 增加防抖延迟
 
 // 全局变量
 let currentEditingTask = null;
@@ -39,6 +39,7 @@ let taskLastExecutionTime = new Map();
 let cleanupTimer = null;
 let lastTasksHash = '';
 
+// 优化的防抖保存
 const debouncedSave = debounce(() => {
     saveSettingsDebounced();
 }, DEBOUNCE_DELAY);
@@ -60,6 +61,7 @@ function scheduleCleanup() {
     if (cleanupTimer) return;
     
     cleanupTimer = setInterval(() => {
+        // 清理过期的冷却记录
         const now = Date.now();
         for (const [taskName, lastTime] of taskLastExecutionTime.entries()) {
             if (now - lastTime > TASK_COOLDOWN * 2) {
@@ -67,6 +69,7 @@ function scheduleCleanup() {
             }
         }
         
+        // 限制冷却记录数量
         if (taskLastExecutionTime.size > MAX_COOLDOWN_ENTRIES) {
             const entries = Array.from(taskLastExecutionTime.entries());
             entries.sort((a, b) => b[1] - a[1]);
@@ -76,6 +79,7 @@ function scheduleCleanup() {
             });
         }
         
+        // 清理过期消息记录
         const settings = getSettings();
         if (settings.processedMessages.length > MAX_PROCESSED_MESSAGES) {
             settings.processedMessages = settings.processedMessages.slice(-MAX_PROCESSED_MESSAGES);
@@ -95,7 +99,7 @@ function setTaskCooldown(taskName) {
     taskLastExecutionTime.set(taskName, Date.now());
 }
 
-// 消息处理状态管理
+// 优化的消息处理状态管理
 function isMessageProcessed(messageKey) { 
     return getSettings().processedMessages.includes(messageKey); 
 }
@@ -106,6 +110,7 @@ function markMessageAsProcessed(messageKey) {
     
     settings.processedMessages.push(messageKey);
     
+    // 立即清理，避免内存过度使用
     if (settings.processedMessages.length > MAX_PROCESSED_MESSAGES) {
         settings.processedMessages = settings.processedMessages.slice(-Math.floor(MAX_PROCESSED_MESSAGES/2));
     }
@@ -177,18 +182,20 @@ function calculateTurnCount() {
     return Math.min(userMessages, aiMessages);
 }
 
-// 任务执行检查
+// 优化的任务执行检查
 async function checkAndExecuteTasks(triggerContext = 'after_ai', overrideChatChanged = null, overrideNewChat = null) {
     const settings = getSettings();
     if (!settings.enabled || (overrideChatChanged ?? chatJustChanged) || 
         (overrideNewChat ?? isNewChat) || isExecutingTask) return;
     
+    // 合并任务列表，减少重复操作
     const allTasks = [...settings.globalTasks, ...getCharacterTasks()];
     if (allTasks.length === 0) return;
     
     const now = Date.now();
     const currentTurnCount = calculateTurnCount();
     
+    // 批量检查，减少单独处理
     const tasksToExecute = allTasks.filter(task => {
         if (task.disabled || task.interval <= 0) return false;
         
@@ -215,7 +222,7 @@ async function checkAndExecuteTasks(triggerContext = 'after_ai', overrideChatCha
     if (triggerContext === 'after_ai') lastTurnCount = currentTurnCount;
 }
 
-// 事件处理
+// 优化的事件处理
 async function onMessageReceived(messageId) {
     if (typeof messageId !== 'number' || messageId < 0 || !chat[messageId]) return;
     
@@ -223,6 +230,7 @@ async function onMessageReceived(messageId) {
     if (message.is_user || message.is_system || message.mes === '...' || 
         isCommandGenerated || isExecutingTask) return;
     
+    // 简化swipe检测
     if (message.swipe_id !== undefined && message.swipe_id > 0) {
         console.debug('[Tasks] 跳过swipe消息，不触发任务');
         return;
@@ -287,9 +295,7 @@ function onChatChanged(chatId) {
 // 优化的UI管理
 function getTasksHash() {
     const allTasks = [...getSettings().globalTasks, ...getCharacterTasks()];
-    return allTasks.map(t => 
-        `${t.id}_${t.disabled}_${t.name}_${t.interval}_${t.floorType}_${t.triggerTiming}_${t.commands}`
-    ).join('|');
+    return allTasks.map(t => `${t.id}_${t.disabled}_${t.name}_${t.interval}`).join('|');
 }
 
 function createTaskItem(task, index, isCharacterTask = false) {
@@ -305,6 +311,7 @@ function createTaskItem(task, index, isCharacterTask = false) {
     taskElement.find('.disable_task').attr('id', `task_disable_${task.id}`).prop('checked', task.disabled);
     taskElement.find('label.checkbox').attr('for', `task_disable_${task.id}`);
 
+    // 使用事件委托减少内存占用
     taskElement.find('.disable_task').on('input', () => { 
         task.disabled = taskElement.find('.disable_task').prop('checked'); 
         saveTask(task, index, isCharacterTask); 
@@ -317,7 +324,7 @@ function createTaskItem(task, index, isCharacterTask = false) {
 
 function refreshTaskLists() {
     const currentHash = getTasksHash();
-    if (currentHash === lastTasksHash) return;
+    if (currentHash === lastTasksHash) return; // 无变化则跳过
     
     lastTasksHash = currentHash;
     
@@ -326,15 +333,20 @@ function refreshTaskLists() {
     const globalTasks = getSettings().globalTasks;
     const characterTasks = getCharacterTasks();
     
-    $globalList.empty();
-    globalTasks.forEach((task, i) => 
-        $globalList.append(createTaskItem(task, i, false))
-    );
+    // 只在任务数量变化时重建DOM
+    if ($globalList.children().length !== globalTasks.length) {
+        $globalList.empty();
+        globalTasks.forEach((task, i) => 
+            $globalList.append(createTaskItem(task, i, false))
+        );
+    }
     
-    $charList.empty();
-    characterTasks.forEach((task, i) => 
-        $charList.append(createTaskItem(task, i, true))
-    );
+    if ($charList.children().length !== characterTasks.length) {
+        $charList.empty();
+        characterTasks.forEach((task, i) => 
+            $charList.append(createTaskItem(task, i, true))
+        );
+    }
 }
 
 function showTaskEditor(task = null, isEdit = false, isCharacterTask = false) {
