@@ -182,20 +182,18 @@ function calculateTurnCount() {
     return Math.min(userMessages, aiMessages);
 }
 
-// 优化的任务执行检查
+// 任务执行检查
 async function checkAndExecuteTasks(triggerContext = 'after_ai', overrideChatChanged = null, overrideNewChat = null) {
     const settings = getSettings();
     if (!settings.enabled || (overrideChatChanged ?? chatJustChanged) || 
         (overrideNewChat ?? isNewChat) || isExecutingTask) return;
     
-    // 合并任务列表，减少重复操作
     const allTasks = [...settings.globalTasks, ...getCharacterTasks()];
     if (allTasks.length === 0) return;
     
     const now = Date.now();
     const currentTurnCount = calculateTurnCount();
     
-    // 批量检查，减少单独处理
     const tasksToExecute = allTasks.filter(task => {
         if (task.disabled || task.interval <= 0) return false;
         
@@ -297,7 +295,9 @@ function onChatChanged(chatId) {
 
 function getTasksHash() {
     const allTasks = [...getSettings().globalTasks, ...getCharacterTasks()];
-    return allTasks.map(t => `${t.id}_${t.disabled}_${t.name}_${t.interval}`).join('|');
+    return allTasks.map(t => 
+        `${t.id}_${t.disabled}_${t.name}_${t.interval}_${t.floorType}_${t.triggerTiming}`
+    ).join('|');
 }
 
 function createTaskItem(task, index, isCharacterTask = false) {
@@ -334,19 +334,15 @@ function refreshTaskLists() {
     const globalTasks = getSettings().globalTasks;
     const characterTasks = getCharacterTasks();
     
-    if ($globalList.children().length !== globalTasks.length) {
-        $globalList.empty();
-        globalTasks.forEach((task, i) => 
-            $globalList.append(createTaskItem(task, i, false))
-        );
-    }
+    $globalList.empty();
+    globalTasks.forEach((task, i) => 
+        $globalList.append(createTaskItem(task, i, false))
+    );
     
-    if ($charList.children().length !== characterTasks.length) {
-        $charList.empty();
-        characterTasks.forEach((task, i) => 
-            $charList.append(createTaskItem(task, i, true))
-        );
-    }
+    $charList.empty();
+    characterTasks.forEach((task, i) => 
+        $charList.append(createTaskItem(task, i, true))
+    );
 }
 
 function showTaskEditor(task = null, isEdit = false, isCharacterTask = false) {
