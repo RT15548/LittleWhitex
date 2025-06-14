@@ -5,7 +5,7 @@ import { callGenericPopup, POPUP_TYPE } from "../../../popup.js";
 const EXT_ID = "LittleWhiteBox";
 const CONSTANTS = {
     MAX_HISTORY_RECORDS: 15,
-    PREVIEW_TIMEOUT: 5000,
+    PREVIEW_TIMEOUT: 3000,
     CHECK_INTERVAL: 200,
     DEBOUNCE_DELAY: 300,
     TARGET_ENDPOINT: '/api/backends/chat-completions/generate',
