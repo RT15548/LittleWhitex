@@ -930,6 +930,7 @@ pre:has(+ .xiaobaix-iframe) {
     color: #ffffff !important;
     font-size: 12px;
     line-height: 1.4;
+    text-align: left;
 }
 
 .mes_history_preview {
