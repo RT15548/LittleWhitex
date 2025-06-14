@@ -25,12 +25,18 @@ function getSettings() {
         extension_settings[EXT_ID] = {};
     }
     if (!extension_settings[EXT_ID].preview) {
-        extension_settings[EXT_ID].preview = {
-            enabled: true,
-            timeoutSeconds: 5
-        };
+        extension_settings[EXT_ID].preview = {};
     }
-    return extension_settings[EXT_ID].preview;
+    
+    const settings = extension_settings[EXT_ID].preview;
+    
+    // 确保所有必需的字段都存在
+    if (settings.enabled === undefined) settings.enabled = true;
+    if (!settings.timeoutSeconds || typeof settings.timeoutSeconds !== 'number') {
+        settings.timeoutSeconds = 5;
+    }
+    
+    return settings;
 }
 
 function isTargetApiRequest(url, options = {}) {
@@ -174,13 +180,16 @@ function extractUserInputFromMessages(messages) {
 
 function waitForPreviewInterception() {
     const settings = getSettings();
-    const timeoutMs = settings.timeoutSeconds * 1000;
+    const timeoutMs = (settings.timeoutSeconds || 5) * 1000;
     
     return new Promise((resolve) => {
         previewPromiseResolve = resolve;
         setTimeout(() => {
             if (previewPromiseResolve) {
-                previewPromiseResolve({ success: false, error: `等待超时 (${settings.timeoutSeconds}秒)` });
+                previewPromiseResolve({ 
+                    success: false, 
+                    error: `等待超时 (${settings.timeoutSeconds || 5}秒)` 
+                });
                 previewPromiseResolve = null;
             }
         }, timeoutMs);
