@@ -5,9 +5,13 @@ import { callGenericPopup, POPUP_TYPE } from "../../../popup.js";
 const EXT_ID = "LittleWhiteBox";
 const CONSTANTS = {
     MAX_HISTORY_RECORDS: 15,
+    PREVIEW_TIMEOUT: 5000,
+    MIN_PREVIEW_TIMEOUT: 1000,
+    MAX_PREVIEW_TIMEOUT: 10000,
+    CHECK_INTERVAL: 200,
+    DEBOUNCE_DELAY: 300,
     TARGET_ENDPOINT: '/api/backends/chat-completions/generate',
-    CLEANUP_INTERVAL: 300000,
-    DEBOUNCE_DELAY: 300
+    CLEANUP_INTERVAL: 300000
 };
 
 let isPreviewMode = false;
@@ -19,19 +23,27 @@ let isInterceptorActive = false;
 let cleanupTimer = null;
 let eventListeners = [];
 let previewPromiseResolve = null;
+let previewPromiseReject = null;
+
+function highlightXmlTags(text) {
+    if (typeof text !== 'string') return text;
+    return text.replace(/<([^>]+)>/g, '<span style="color:rgb(153, 153, 153); font-weight: bold;">&lt;$1&gt;</span>');
+}
 
 function getSettings() {
     if (!extension_settings[EXT_ID]) {
         extension_settings[EXT_ID] = {};
     }
     if (!extension_settings[EXT_ID].preview) {
-        extension_settings[EXT_ID].preview = {};
+        extension_settings[EXT_ID].preview = {
+            enabled: true,
+            maxPreviewLength: 300,
+            timeoutSeconds: 5
+        };
     }
     
+    // 确保 timeoutSeconds 存在且有效
     const settings = extension_settings[EXT_ID].preview;
-    
-    // 确保所有必需的字段都存在
-    if (settings.enabled === undefined) settings.enabled = true;
     if (!settings.timeoutSeconds || typeof settings.timeoutSeconds !== 'number') {
         settings.timeoutSeconds = 5;
     }
@@ -40,8 +52,13 @@ function getSettings() {
 }
 
 function isTargetApiRequest(url, options = {}) {
-    return url?.includes(CONSTANTS.TARGET_ENDPOINT) && 
-           options.body && String(options.body).includes('"messages"');
+    if (!url || typeof url !== 'string') return false;
+    if (!url.includes(CONSTANTS.TARGET_ENDPOINT)) return false;
+    if (options.body) {
+        const bodyStr = String(options.body);
+        return bodyStr.includes('"messages"');
+    }
+    return false;
 }
 
 function restoreOriginalFetch() {
@@ -74,19 +91,30 @@ function setupInterceptor() {
 
 function recordRealApiRequest(url, options) {
     try {
-        const requestData = JSON.parse(options.body);
+        let requestData = null;
+        if (options.body) {
+            try {
+                requestData = JSON.parse(options.body);
+            } catch (e) {
+                requestData = { raw: options.body };
+            }
+        }
+        
+        if (!requestData) return;
+        
         const context = getContext();
         const userInput = extractUserInputFromMessages(requestData.messages || []);
         
         const historyItem = {
             url,
-            requestData,
+            method: options.method || 'POST',
+            requestData: requestData,
             messages: requestData.messages || [],
             model: requestData.model || 'Unknown',
             timestamp: Date.now(),
             messageId: context.chat?.length || 0,
             characterName: context.characters?.[context.characterId]?.name || 'Unknown',
-            userInput,
+            userInput: userInput,
             isRealRequest: true
         };
         
@@ -94,16 +122,37 @@ function recordRealApiRequest(url, options) {
         if (apiRequestHistory.length > CONSTANTS.MAX_HISTORY_RECORDS) {
             apiRequestHistory = apiRequestHistory.slice(0, CONSTANTS.MAX_HISTORY_RECORDS);
         }
+        
+        setTimeout(() => {
+            if (apiRequestHistory[0] && !apiRequestHistory[0].associatedMessageId) {
+                apiRequestHistory[0].associatedMessageId = context.chat?.length || 0;
+            }
+        }, 1000);
+        
     } catch (error) {}
 }
 
 async function handlePreviewInterception(url, options) {
     try {
-        const requestData = JSON.parse(options.body);
+        let requestData = null;
+        if (options.body) {
+            try {
+                requestData = JSON.parse(options.body);
+            } catch (e) {
+                if (previewPromiseReject) {
+                    previewPromiseReject(new Error('请求数据解析失败'));
+                    previewPromiseResolve = null;
+                    previewPromiseReject = null;
+                }
+                return originalFetch.call(window, url, options);
+            }
+        }
+        
         const userInput = extractUserInputFromMessages(requestData?.messages || []);
         
         capturedPreviewData = {
             url,
+            method: options.method || 'POST',
             requestData,
             messages: requestData?.messages || [],
             model: requestData?.model || 'Unknown',
@@ -112,9 +161,11 @@ async function handlePreviewInterception(url, options) {
             isPreview: true
         };
         
+        // 立即resolve Promise
         if (previewPromiseResolve) {
             previewPromiseResolve({ success: true, data: capturedPreviewData });
             previewPromiseResolve = null;
+            previewPromiseReject = null;
         }
         
         return new Response(JSON.stringify({
@@ -128,10 +179,12 @@ async function handlePreviewInterception(url, options) {
         });
         
     } catch (error) {
-        if (previewPromiseResolve) {
-            previewPromiseResolve({ success: false, error: error.message });
+        if (previewPromiseReject) {
+            previewPromiseReject(error);
             previewPromiseResolve = null;
+            previewPromiseReject = null;
         }
+        
         return new Response(JSON.stringify({
             error: { message: "✘ 预览失败: " + error.message }
         }), { status: 500 });
@@ -154,8 +207,18 @@ function interceptMessageCreation() {
         return originalPush.apply(this, items);
     };
     
+    const originalAppendChild = Element.prototype.appendChild;
+    Element.prototype.appendChild = function(child) {
+        if (isPreviewMode && child?.classList?.contains('mes')) {
+            return child;
+        }
+        return originalAppendChild.call(this, child);
+    };
+    
     return function restore() {
         context.chat.push = originalPush;
+        Element.prototype.appendChild = originalAppendChild;
+        
         if (previewMessageIds.size > 0) {
             const idsToDelete = Array.from(previewMessageIds).sort((a, b) => b - a);
             idsToDelete.forEach(id => {
@@ -180,19 +243,37 @@ function extractUserInputFromMessages(messages) {
 
 function waitForPreviewInterception() {
     const settings = getSettings();
-    const timeoutMs = (settings.timeoutSeconds || 5) * 1000;
+    const timeoutMs = settings.timeoutSeconds * 1000;
     
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
         previewPromiseResolve = resolve;
-        setTimeout(() => {
+        previewPromiseReject = reject;
+        
+        // 设置超时兜底
+        const timeoutId = setTimeout(() => {
             if (previewPromiseResolve) {
                 previewPromiseResolve({ 
                     success: false, 
-                    error: `等待超时 (${settings.timeoutSeconds || 5}秒)` 
+                    error: `等待超时 (${settings.timeoutSeconds}秒)` 
                 });
                 previewPromiseResolve = null;
+                previewPromiseReject = null;
             }
         }, timeoutMs);
+        
+        // 包装resolve和reject以清除超时
+        const originalResolve = previewPromiseResolve;
+        const originalReject = previewPromiseReject;
+        
+        previewPromiseResolve = (value) => {
+            clearTimeout(timeoutId);
+            if (originalResolve) originalResolve(value);
+        };
+        
+        previewPromiseReject = (error) => {
+            clearTimeout(timeoutId);
+            if (originalReject) originalReject(error);
+        };
     });
 }
 
@@ -216,18 +297,30 @@ async function showMessagePreview() {
         isPreviewMode = true;
         capturedPreviewData = null;
         previewMessageIds.clear();
+        
         previewPromiseResolve = null;
+        previewPromiseReject = null;
         
         restoreMessageCreation = interceptMessageCreation();
         
-        loadingToast = toastr.info('正在拦截API请求...', '', { 
-            timeOut: 0, 
-            tapToDismiss: false 
-        });
+        loadingToast = toastr.info(
+            '正在拦截API请求...', 
+            '', { 
+                timeOut: 0, 
+                tapToDismiss: false,
+                allowHtml: true
+            }
+        );
 
         $('#send_but').trigger('click');
         
-        const result = await waitForPreviewInterception();
+        // 使用try-catch包装等待函数
+        let result;
+        try {
+            result = await waitForPreviewInterception();
+        } catch (error) {
+            result = { success: false, error: error.message };
+        }
         
         toastr.clear();
         
@@ -246,7 +339,10 @@ async function showMessagePreview() {
             restoreMessageCreation();
         }
         capturedPreviewData = null;
+        
+        // 清理Promise引用
         previewPromiseResolve = null;
+        previewPromiseReject = null;
     }
 }
 
@@ -273,6 +369,7 @@ function findApiRequestForMessage(messageId) {
     const strategies = [
         record => record.associatedMessageId === messageId,
         record => record.messageId === messageId,
+        record => record.messageId === messageId - 1,
         record => Math.abs(record.messageId - messageId) <= 1
     ];
 
@@ -281,7 +378,10 @@ function findApiRequestForMessage(messageId) {
         if (match) return match;
     }
 
-    return apiRequestHistory[0];
+    const candidates = apiRequestHistory.filter(record => record.messageId <= messageId + 2);
+    return candidates.length > 0 ? 
+        candidates.sort((a, b) => b.messageId - a.messageId)[0] : 
+        apiRequestHistory[0];
 }
 
 async function showMessageHistoryPreview(messageId) {
@@ -289,10 +389,24 @@ async function showMessageHistoryPreview(messageId) {
         const settings = getSettings();
         if (!settings.enabled) return;
 
+        const context = getContext();
+        const historyMessages = context.chat.slice(0, messageId);
+        if (historyMessages.length === 0) {
+            toastr.info('此消息之前没有历史记录');
+            return;
+        }
+
         const apiRecord = findApiRequestForMessage(messageId);
         
         if (apiRecord && apiRecord.messages && apiRecord.messages.length > 0) {
-            const formattedContent = formatPreviewContent(apiRecord, apiRecord.userInput, true);
+            const messageData = {
+                ...apiRecord,
+                isHistoryPreview: true,
+                targetMessageId: messageId,
+                historyCount: historyMessages.length
+            };
+
+            const formattedContent = formatPreviewContent(messageData, messageData.userInput, true);
             const popupContent = `<div class="message-preview-container"><div class="message-preview-content-box">${formattedContent}</div></div>`;
             
             await callGenericPopup(popupContent, POPUP_TYPE.TEXT, 
@@ -314,12 +428,19 @@ function formatPreviewContent(data, userInput, isHistory = false) {
     let content = '';
     
     content += `${'='.repeat(60)}\n`;
-    content += isHistory ? `消息历史预览\n` : `● LLM API请求预览\n`;
+    if (isHistory) {
+        content += `消息历史预览\n`;
+        content += `目标消息: 第 ${data.targetMessageId + 1} 条\n`;
+        content += `历史记录数量: ${data.historyCount} 条消息\n`;
+    } else {
+        content += `● LLM API请求预览\n`;
+    }
     content += `${'='.repeat(60)}\n\n`;
     
     content += `API信息:\n`;
     content += `${'-'.repeat(30)}\n`;
     content += `URL: ${data.url}\n`;
+    content += `Method: ${data.method || 'POST'}\n`;
     content += `Model: ${data.model || 'Unknown'}\n`;
     content += `Messages: ${data.messages.length}\n`;
     content += `Time: ${new Date(data.timestamp).toLocaleString()}\n`;
@@ -360,12 +481,24 @@ function formatMessagesArray(messages, userInput) {
                          msg.role === 'user' ? '✎' : '♪';
         
         let inputNote = '';
-        if (msg.role === 'user' && msgContent === userInput) {
-            inputNote = ' // ⬅ 实际发送的内容';
+        if (msg.role === 'user') {
+            if (msgContent === userInput) {
+                inputNote = ' // ⬅ 实际发送的内容';
+            } else if (msgContent.startsWith('/')) {
+                inputNote = ` // ⬅ 斜杠命令`;
+            }
         }
         
         content += `\n[${index + 1}] ${roleIcon} ${msg.role.toUpperCase()}${inputNote}\n`;
-        content += `${msgContent}\n`;
+        
+        const hasXmlTags = /<[^>]+>/g.test(msgContent);
+        
+        if (hasXmlTags) {
+            content += `【包含XML标记】\n`;
+            content += `<pre style="white-space: pre-wrap;">${highlightXmlTags(msgContent)}</pre>\n`;
+        } else {
+            content += `${msgContent}\n`;
+        }
         
         if (index < processedMessages.length - 1) {
             content += `${'-'.repeat(20)}\n`;
@@ -373,6 +506,14 @@ function formatMessagesArray(messages, userInput) {
     });
     
     return content;
+}
+
+function createPreviewButton() {
+    return $(`<div id="message_preview_btn" class="fa-solid fa-coffee interactable" title="预览消息"></div>`).on('click', showMessagePreview);
+}
+
+function createMessageHistoryButton() {
+    return $(`<div title="查看历史API请求" class="mes_button mes_history_preview fa-solid fa-coffee"></div>`);
 }
 
 function debounce(func, wait) {
@@ -398,12 +539,11 @@ const addHistoryButtonsDebounced = debounce(() => {
 
         const extraButtons = $(this).find('.extraMesButtons');
         if (extraButtons.length > 0) {
-            const historyButton = $(`<div title="查看历史API请求" class="mes_button mes_history_preview fa-solid fa-coffee"></div>`)
-                .on('click', function(e) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    showMessageHistoryPreview(mesId);
-                });
+            const historyButton = createMessageHistoryButton().on('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                showMessageHistoryPreview(mesId);
+            });
             extraButtons.prepend(historyButton);
         }
     });
@@ -413,9 +553,30 @@ function cleanupMemory() {
     if (apiRequestHistory.length > CONSTANTS.MAX_HISTORY_RECORDS) {
         apiRequestHistory = apiRequestHistory.slice(0, CONSTANTS.MAX_HISTORY_RECORDS);
     }
+    
     previewMessageIds.clear();
+    
     if (capturedPreviewData) {
         capturedPreviewData = null;
+    }
+    
+    $('.mes_history_preview').each(function() {
+        const $this = $(this);
+        if (!$this.closest('.mes').length) {
+            $this.remove();
+        }
+    });
+}
+
+function startCleanupTimer() {
+    if (cleanupTimer) clearInterval(cleanupTimer);
+    cleanupTimer = setInterval(cleanupMemory, CONSTANTS.CLEANUP_INTERVAL);
+}
+
+function stopCleanupTimer() {
+    if (cleanupTimer) {
+        clearInterval(cleanupTimer);
+        cleanupTimer = null;
     }
 }
 
@@ -429,6 +590,21 @@ function addEventListeners() {
             handler: () => {
                 apiRequestHistory = [];
                 setTimeout(addHistoryButtonsDebounced, 200);
+            }
+        },
+        {
+            event: event_types.MESSAGE_RECEIVED,
+            handler: (messageId) => {
+                setTimeout(() => {
+                    if (apiRequestHistory.length > 0) {
+                        const recentRequest = apiRequestHistory.find(record =>
+                            !record.associatedMessageId && (Date.now() - record.timestamp) < 30000
+                        );
+                        if (recentRequest) {
+                            recentRequest.associatedMessageId = messageId;
+                        }
+                    }
+                }, 100);
             }
         }
     ];
@@ -447,13 +623,16 @@ function removeEventListeners() {
 }
 
 function cleanup() {
-    if (cleanupTimer) clearInterval(cleanupTimer);
+    stopCleanupTimer();
     removeEventListeners();
     restoreOriginalFetch();
     $('.mes_history_preview').remove();
     $('#message_preview_btn').remove();
     cleanupMemory();
+    
+    // 清理Promise引用
     previewPromiseResolve = null;
+    previewPromiseReject = null;
 }
 
 function initMessagePreview() {
@@ -462,9 +641,7 @@ function initMessagePreview() {
         
         const settings = getSettings();
         
-        const previewBtn = $(`<div id="message_preview_btn" class="fa-solid fa-coffee interactable" title="预览消息"></div>`)
-            .on('click', showMessagePreview);
-        $("#send_but").before(previewBtn);
+        $("#send_but").before(createPreviewButton());
         
         $("#xiaobaix_preview_enabled").prop("checked", settings.enabled).on("change", function() {
             settings.enabled = $(this).prop("checked");
@@ -473,10 +650,10 @@ function initMessagePreview() {
             
             if (settings.enabled) {
                 addHistoryButtonsDebounced();
-                cleanupTimer = setInterval(cleanupMemory, CONSTANTS.CLEANUP_INTERVAL);
+                startCleanupTimer();
             } else {
                 $('.mes_history_preview').remove();
-                if (cleanupTimer) clearInterval(cleanupTimer);
+                stopCleanupTimer();
             }
         });
         
@@ -490,7 +667,7 @@ function initMessagePreview() {
         }
         
         if (settings.enabled) {
-            cleanupTimer = setInterval(cleanupMemory, CONSTANTS.CLEANUP_INTERVAL);
+            startCleanupTimer();
         }
         
     } catch (error) {
