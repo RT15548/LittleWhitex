@@ -8,10 +8,8 @@ const PREVIEW_MODULE_NAME = "xiaobaix-preview";
 
 let apiRequestHistory = [];
 let lastApiRequest = null;
-let originalSendFunction = null;
 const MAX_HISTORY_RECORDS = 50;
 
-// 增强的模块动态导入函数
 async function safeImportModules() {
     const modules = {};
     
@@ -19,7 +17,6 @@ async function safeImportModules() {
         const worldInfoModule = await import('../../../world-info.js');
         modules.getWorldInfoPrompt = worldInfoModule.getWorldInfoPrompt;
     } catch (e) {
-        console.warn('[预览] 世界信息模块导入失败:', e);
         modules.getWorldInfoPrompt = () => Promise.resolve({ worldInfoBefore: '', worldInfoAfter: '' });
     }
     
@@ -27,7 +24,6 @@ async function safeImportModules() {
         const powerUserModule = await import('../../../power-user.js');
         modules.power_user = powerUserModule.power_user;
     } catch (e) {
-        console.warn('[预览] 高级用户模块导入失败:', e);
         modules.power_user = {};
     }
     
@@ -40,7 +36,6 @@ async function safeImportModules() {
             AFTER_PROMPT: 2
         };
     } catch (e) {
-        console.warn('[预览] 扩展模块导入失败:', e);
         modules.getExtensionPrompt = () => Promise.resolve(null);
         modules.extension_prompt_types = {
             BEFORE_PROMPT: 0,
@@ -52,29 +47,25 @@ async function safeImportModules() {
     return modules;
 }
 
-// 获取设置
 function getSettings() {
     if (!extension_settings[EXT_ID].preview) {
         extension_settings[EXT_ID].preview = {
             enabled: true,
             maxPreviewLength: 300,
-            interceptTimeout: 5000  // 延长到5秒
+            interceptTimeout: 5000
         };
     }
     return extension_settings[EXT_ID].preview;
 }
 
-// 创建预览按钮
 function createPreviewButton() {
     return $(`<div id="message_preview_btn" class="fa-solid fa-coffee interactable" title="预览将要发送给LLM的消息"></div>`).on('click', showMessagePreview);
 }
 
-// 创建历史按钮
 function createMessageHistoryButton() {
     return $(`<div title="查看此消息前的历史记录" class="mes_button mes_history_preview fa-solid fa-coffee"></div>`);
 }
 
-// 为消息添加历史按钮
 function addHistoryButtonsToMessages() {
     const settings = getSettings();
     if (!settings.enabled) return;
@@ -96,7 +87,6 @@ function addHistoryButtonsToMessages() {
     });
 }
 
-// 查找对应的API请求数据
 function findApiRequestForMessage(messageId) {
     if (apiRequestHistory.length === 0) return null;
     
@@ -116,7 +106,6 @@ function findApiRequestForMessage(messageId) {
     return candidates.length > 0 ? candidates.sort((a, b) => b.messageId - a.messageId)[0] : null;
 }
 
-// 显示消息历史预览
 async function showMessageHistoryPreview(messageId) {
     try {
         const settings = getSettings();
@@ -155,12 +144,10 @@ async function showMessageHistoryPreview(messageId) {
         await callGenericPopup(popupContent, POPUP_TYPE.TEXT, `消息历史预览 - 第 ${messageId + 1} 条消息之前`, { wide: true, large: true });
 
     } catch (error) {
-        console.error('[预览] 历史预览错误:', error);
         toastr.error('无法显示消息历史预览: ' + error.message);
     }
 }
 
-// 增强的阻止消息创建函数
 function preventMessageCreation() {
     const context = getContext();
     const originalMethods = {
@@ -177,14 +164,12 @@ function preventMessageCreation() {
         splice: context.chat.splice.bind(context.chat)
     };
     
-    // 更彻底地阻止聊天数组修改
     context.chat.push = () => context.chat.length;
     context.chat.unshift = () => context.chat.length;
     context.chat.splice = (start, deleteCount, ...items) => {
         return items.length > 0 ? [] : originalChatMethods.splice(start, deleteCount);
     };
     
-    // 阻止关键函数执行
     const originalFunctions = {};
     const functionsToBlock = ['Generate', 'addOneMessage', 'printMessages', 'finishGenerating', 'showSwipeButtons'];
     
@@ -192,19 +177,13 @@ function preventMessageCreation() {
         if (window[fn]) {
             originalFunctions[fn] = window[fn];
             if (fn === 'Generate') {
-                window[fn] = () => {
-                    console.log('[预览] 阻止Generate执行');
-                    return Promise.resolve('PREVIEW_MODE');
-                };
+                window[fn] = () => Promise.resolve('PREVIEW_MODE');
             } else {
-                window[fn] = () => {
-                    console.log(`[预览] 阻止${fn}执行`);
-                };
+                window[fn] = () => {};
             }
         }
     });
     
-    // 阻止DOM消息元素创建
     const isMessageElement = (child) => {
         if (!child?.classList) return false;
         return child.classList.contains('mes') || 
@@ -214,41 +193,29 @@ function preventMessageCreation() {
     };
     
     Element.prototype.appendChild = function(child) { 
-        if (isMessageElement(child)) {
-            console.log('[预览] 阻止消息DOM创建');
-            return child;
-        }
+        if (isMessageElement(child)) return child;
         return originalMethods.appendChild.call(this, child); 
     };
     
     Element.prototype.insertBefore = function(newNode, referenceNode) { 
-        if (isMessageElement(newNode)) {
-            console.log('[预览] 阻止消息DOM插入');
-            return newNode;
-        }
+        if (isMessageElement(newNode)) return newNode;
         return originalMethods.insertBefore.call(this, newNode, referenceNode); 
     };
     
     return function restoreMessageCreation() {
-        console.log('[预览] 恢复所有被阻止的函数');
-        
-        // 恢复聊天数组方法
         context.chat.push = originalChatMethods.push;
         context.chat.unshift = originalChatMethods.unshift;
         context.chat.splice = originalChatMethods.splice;
         
-        // 恢复被阻止的函数
         Object.keys(originalFunctions).forEach(fn => {
             window[fn] = originalFunctions[fn];
         });
         
-        // 恢复DOM方法
         Element.prototype.appendChild = originalMethods.appendChild;
         Element.prototype.insertBefore = originalMethods.insertBefore;
     };
 }
 
-// 获取当前消息内容 - 增强版
 async function getCurrentMessageContent() {
     const context = getContext();
     const textareaText = String($('#send_textarea').val());
@@ -256,9 +223,7 @@ async function getCurrentMessageContent() {
     
     if (!character) throw new Error('没有选择角色');
 
-    // 检查最近的API请求
     if (lastApiRequest && (Date.now() - lastApiRequest.timestamp < 60000)) {
-        console.log('[预览] 使用最近的API请求数据');
         return {
             type: 'api_intercepted',
             messages: lastApiRequest.messages,
@@ -270,9 +235,6 @@ async function getCurrentMessageContent() {
 
     if (main_api === 'openai') {
         try {
-            console.log('[预览] 开始构建OpenAI消息');
-            
-            // 安全导入模块
             const modules = await safeImportModules();
             
             const fullChat = [...context.chat];
@@ -285,15 +247,11 @@ async function getCurrentMessageContent() {
                 });
             }
 
-            // 安全获取世界信息
             let worldInfo = { worldInfoBefore: '', worldInfoAfter: '' };
             try {
                 worldInfo = await modules.getWorldInfoPrompt(fullChat, context.maxContext || 4096);
-            } catch (e) {
-                console.warn('[预览] 世界信息获取失败:', e);
-            }
+            } catch (e) {}
             
-            // 安全获取扩展提示
             const extensionPrompts = [];
             const { extension_prompt_types } = modules;
             
@@ -301,9 +259,7 @@ async function getCurrentMessageContent() {
                 try {
                     const prompt = await modules.getExtensionPrompt(type);
                     if (prompt) extensionPrompts.push({ role: 'system', content: prompt });
-                } catch (e) {
-                    console.warn('[预览] 扩展提示获取失败:', e);
-                }
+                } catch (e) {}
             }
 
             const [messages, counts] = await prepareOpenAIMessages({
@@ -319,11 +275,9 @@ async function getCurrentMessageContent() {
                 messageExamples: character.mes_example ? [character.mes_example] : [],
             }, false);
 
-            console.log('[预览] OpenAI消息构建完成，消息数量:', messages.length);
             return { type: 'openai', messages, tokenCount: counts, userInput: textareaText };
             
         } catch (error) {
-            console.error('[预览] OpenAI消息构建失败:', error);
             throw error;
         }
     }
@@ -331,11 +285,10 @@ async function getCurrentMessageContent() {
     return { type: 'other', userInput: textareaText, character, chat: context.chat, api: main_api };
 }
 
-// 增强的捕获真实消息数据函数
 async function captureRealMessageData() {
     return new Promise((resolve) => {
         const settings = getSettings();
-        const interceptTimeout = settings.interceptTimeout || 5000; // 使用设置中的超时时间
+        const interceptTimeout = settings.interceptTimeout || 5000;
         
         const textareaText = String($('#send_textarea').val()).trim();
         if (!textareaText) {
@@ -343,15 +296,12 @@ async function captureRealMessageData() {
             return;
         }
         
-        console.log(`[预览] 开始捕获消息数据，超时时间: ${interceptTimeout}ms`);
-        
         const context = getContext();
         const originalChat = [...context.chat];
         let isPreviewMode = true;
         let requestCaptured = false;
         let capturedData = null;
         
-        // 添加临时消息到聊天
         const tempMessage = {
             name: context.name1 || 'User',
             is_user: true,
@@ -361,44 +311,40 @@ async function captureRealMessageData() {
         };
         context.chat.push(tempMessage);
         
-        // 阻止消息创建
         const restoreMessageCreation = preventMessageCreation();
-        
-        // 拦截fetch请求
         const originalFetch = window.fetch;
         
         window.fetch = function(url, options) {
-            console.log('[预览] 拦截到请求:', url);
-            
-            // 更精确的LLM请求识别
-            const isLLMRequest = url && options?.body && (
-                url.includes('/v1/chat/completions') || 
-                url.includes('/api/openai') ||
-                url.includes('/api/backends/chat-completions') ||
-                url.includes('/chat/completions') ||
-                (url.includes('/generate') && options.body.includes('messages')) ||
-                (url.includes('claude') || url.includes('anthropic')) ||
-                (options.method === 'POST' && options.body.includes('"messages"'))
+            const isLLMRequest = url && options?.body && options.method !== 'GET' && (
+                url.includes('/v1') ||
+                url.includes('chat/completions') ||
+                url.includes('completions') ||
+                url.includes('generate') ||
+                url.includes('claude') ||
+                url.includes('anthropic')
+            ) && (
+                (typeof options.body === 'string' && (
+                    options.body.includes('"messages"') ||
+                    options.body.includes("'messages'") ||
+                    options.body.includes('"prompt"')
+                ))
             );
             
-            // 排除非LLM请求
             const isExcludedRequest = url && (
                 url.includes('/api/chats/') || 
                 url.includes('/api/characters') || 
                 url.includes('/api/settings') || 
                 url.includes('/api/images') || 
                 url.includes('/api/files') ||
-                url.includes('/api/worldinfo') ||
-                url.includes('.png') || url.includes('.jpg') || url.includes('.gif')
+                url.includes('.png') || url.includes('.jpg') || url.includes('.css') || url.includes('.js') ||
+                (url.includes('/models') && !options.body?.includes('"messages"'))
             );
             
             if (isLLMRequest && !isExcludedRequest && isPreviewMode) {
-                console.log('[预览] 捕获到LLM请求');
                 requestCaptured = true;
                 
                 try {
                     const requestData = JSON.parse(options.body);
-                    console.log('[预览] 解析请求数据成功，消息数量:', requestData.messages?.length || 0);
                     
                     if (requestData.messages && requestData.messages.length > 0) {
                         capturedData = {
@@ -407,12 +353,12 @@ async function captureRealMessageData() {
                             model: requestData.model || 'Unknown',
                             timestamp: Date.now(), 
                             fullRequest: requestData,
-                            isPreview: true
+                            isPreview: true,
+                            endpoint: extractEndpointInfo(url)
                         };
                         
                         lastApiRequest = capturedData;
                         
-                        // 返回模拟响应
                         return Promise.resolve(new Response(JSON.stringify({
                             choices: [{ 
                                 message: { 
@@ -424,59 +370,79 @@ async function captureRealMessageData() {
                             status: 200, 
                             headers: { 'Content-Type': 'application/json' } 
                         }));
+                    } else {
+                        capturedData = {
+                            url,
+                            messages: [],
+                            model: requestData.model || 'Unknown',
+                            timestamp: Date.now(),
+                            fullRequest: requestData,
+                            isPreview: true,
+                            endpoint: extractEndpointInfo(url),
+                            warning: 'No valid messages array found'
+                        };
                     }
                 } catch (e) {
-                    console.error('[预览] 解析请求数据失败:', e);
+                    capturedData = {
+                        url,
+                        messages: [],
+                        model: 'Parse Failed',
+                        timestamp: Date.now(),
+                        rawBody: options.body,
+                        parseError: e.message,
+                        isPreview: true,
+                        endpoint: extractEndpointInfo(url)
+                    };
                 }
             }
             
             return originalFetch.apply(this, arguments);
         };
         
-        // 完整恢复函数
         const fullRestore = () => {
-            console.log('[预览] 执行完整恢复');
             isPreviewMode = false;
             window.fetch = originalFetch;
             restoreMessageCreation();
             
-            // 恢复聊天数组
             context.chat.length = originalChat.length;
             context.chat.splice(0, context.chat.length, ...originalChat);
         };
         
-        // 设置超时 - 延长到5秒
         const timeout = setTimeout(() => {
-            console.log(`[预览] ${interceptTimeout}ms超时，执行恢复`);
             fullRestore();
             resolve({ 
                 success: requestCaptured, 
                 data: capturedData, 
                 userInput: textareaText,
-                timeout: true
+                timeout: true,
+                debug: {
+                    interceptTimeout,
+                    capturedData: capturedData ? 'yes' : 'no',
+                    endpoint: capturedData?.endpoint?.full || 'none'
+                }
             });
         }, interceptTimeout);
         
-        // 触发发送
         try {
-            console.log('[预览] 触发发送按钮');
             $('#send_but').click();
             
-            // 延长检查时间到3秒
             setTimeout(() => {
-                console.log('[预览] 3秒检查，执行恢复');
                 clearTimeout(timeout);
                 fullRestore();
                 resolve({ 
                     success: requestCaptured, 
                     data: capturedData, 
                     userInput: textareaText,
-                    completed: true
+                    completed: true,
+                    debug: {
+                        interceptTimeout,
+                        capturedData: capturedData ? 'yes' : 'no',
+                        endpoint: capturedData?.endpoint?.full || 'none'
+                    }
                 });
             }, 3000);
             
         } catch (error) {
-            console.error('[预览] 发送过程出错:', error);
             clearTimeout(timeout);
             fullRestore();
             resolve({ 
@@ -488,7 +454,6 @@ async function captureRealMessageData() {
     });
 }
 
-// 显示消息预览
 async function showMessagePreview() {
     try {
         const settings = getSettings();
@@ -498,8 +463,6 @@ async function showMessagePreview() {
         
         const captureResult = await captureRealMessageData();
         let rawContent = '';
-
-        console.log('[预览] 捕获结果:', captureResult);
 
         if (captureResult.success && captureResult.data?.messages?.length > 0) {
             const { data } = captureResult;
@@ -513,7 +476,6 @@ async function showMessagePreview() {
             }
             rawContent += `\n${formatMessagesArray(data.messages, captureResult.userInput)}`;
         } else {
-            console.log('[预览] 使用备用方案获取消息内容');
             const messageData = await getCurrentMessageContent();
             rawContent = formatPreviewContent(messageData, false);
         }
@@ -522,17 +484,14 @@ async function showMessagePreview() {
         await callGenericPopup(popupContent, POPUP_TYPE.TEXT, '消息预览 - 数据捕获', { wide: true, large: true });
 
     } catch (error) {
-        console.error('[预览] 预览失败:', error);
         toastr.error('无法显示消息预览: ' + error.message);
     }
 }
 
-// 格式化消息数组
 function formatMessagesArray(messages, userInput) {
     let content = `messages: [\n`;
     let processedMessages = [...messages];
     
-    // 去重处理
     if (processedMessages.length >= 2) {
         const [lastMsg, secondLastMsg] = processedMessages.slice(-2);
         if (lastMsg.role === 'user' && secondLastMsg.role === 'user' && 
@@ -567,19 +526,40 @@ function formatMessagesArray(messages, userInput) {
     return content;
 }
 
-// 格式化预览内容
 function formatPreviewContent(messageData, isHistory) {
     let content = '';
-
     if (isHistory) {
         content += `=== 📚 消息历史预览 ===\n目标消息: 第 ${messageData.targetMessageId + 1} 条\n`;
         content += `历史记录数量: ${messageData.historyCount} 条消息\n\n`;
     }
-
     if (messageData.type === 'api_intercepted' && messageData.messages) {
         content += `=== 捕获到的LLM API请求${isHistory ? ' (历史记录)' : ''} ===\n`;
-        content += `Model: ${messageData.model || 'Unknown'}\nMessages Count: ${messageData.messages.length}\n`;
-        if (messageData.userInput) content += `📝 用户输入: "${messageData.userInput}"\n`;
+        
+        if (messageData.endpoint) {
+            content += `🌐 API端点: ${messageData.endpoint.full}\n`;
+            content += `📡 服务器: ${messageData.endpoint.host}${messageData.endpoint.port ? ':' + messageData.endpoint.port : ''}\n`;
+            content += `📍 路径: ${messageData.endpoint.pathname}\n`;
+        }
+        
+        content += `🤖 模型: ${messageData.model || 'Unknown'}\n`;
+        content += `📨 消息数量: ${messageData.messages.length}\n`;
+        content += `⏰ 捕获时间: ${new Date(messageData.timestamp).toLocaleString()}\n`;
+        
+        if (messageData.userInput) {
+            content += `📝 用户输入: "${messageData.userInput}"\n`;
+        }
+        
+        if (messageData.warning) {
+            content += `⚠️  警告: ${messageData.warning}\n`;
+        }
+        
+        if (messageData.parseError) {
+            content += `❌ 解析错误: ${messageData.parseError}\n`;
+            if (messageData.rawBody) {
+                content += `📄 原始请求体预览: ${messageData.rawBody.substring(0, 300)}...\n`;
+            }
+        }
+        
         content += `\n${formatMessagesArray(messageData.messages, messageData.userInput)}`;
     } else if (messageData.type === 'openai' && messageData.messages) {
         content += '=== OpenAI 消息格式 ===\n';
@@ -598,11 +578,16 @@ function formatPreviewContent(messageData, isHistory) {
         });
     } else {
         content += '无法获取消息内容\n';
+        if (messageData.debug) {
+            content += `\n=== 调试信息 ===\n`;
+            content += `端点: ${messageData.debug.endpoint || 'none'}\n`;
+            content += `超时时间: ${messageData.debug.interceptTimeout}ms\n`;
+            content += `捕获数据: ${messageData.debug.capturedData}\n`;
+        }
     }
     return content;
 }
 
-// 提取实际的用户输入
 function extractActualUserInput(messages) {
     if (!messages?.length) return '';
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -615,7 +600,6 @@ function extractActualUserInput(messages) {
     return '';
 }
 
-// 解析斜杠命令内容
 function parseSlashCommandContent(content) {
     const commands = content.includes('\n') ? 
         content.split('\n').filter(line => line.trim().startsWith('/')) : 
@@ -648,7 +632,6 @@ function parseSlashCommandContent(content) {
         (content.length > 50 ? content.substring(0, 50) + '...' : content);
 }
 
-// 保存API请求到历史
 function saveApiRequestToHistory(requestData) {
     const context = getContext();
     const historyItem = {
@@ -662,30 +645,50 @@ function saveApiRequestToHistory(requestData) {
     if (apiRequestHistory.length > MAX_HISTORY_RECORDS) {
         apiRequestHistory = apiRequestHistory.slice(0, MAX_HISTORY_RECORDS);
     }
-    
-    console.log('[预览] 保存API请求到历史, 当前历史数量:', apiRequestHistory.length);
 }
 
-// 增强的拦截API请求函数
+function extractEndpointInfo(url) {
+    try {
+        const urlObj = new URL(url);
+        return {
+            host: urlObj.host,
+            port: urlObj.port,
+            pathname: urlObj.pathname,
+            full: url
+        };
+    } catch (e) {
+        return {
+            host: 'unknown',
+            port: 'unknown', 
+            pathname: 'unknown',
+            full: url
+        };
+    }
+}
+
 function interceptApiRequests() {
     const originalFetch = window.fetch;
     
     window.fetch = function(...args) {
         const [url, options] = args;
         
-        // 更精确的LLM请求识别
-        const isLLMRequest = url && options?.body && (
-            url.includes('/api/openai') || 
-            url.includes('/v1/chat/completions') || 
-            url.includes('/api/backends/chat-completions') || 
-            url.includes('/generate') || 
-            url.includes('/chat/completions') || 
+        const isLLMRequest = url && options?.body && options.method !== 'GET' && (
+            url.includes('/v1/') || 
+            url.includes('/v1') ||
+            url.includes('chat/completions') ||
+            url.includes('completions') ||
+            url.includes('generate') ||
             url.includes('claude') || 
-            url.includes('anthropic') ||
-            (options.method === 'POST' && typeof options.body === 'string' && options.body.includes('"messages"'))
+            url.includes('anthropic')
+        ) && (
+            options.body.includes('"messages"') ||
+            options.body.includes("'messages'") ||
+            (options.method === 'POST' && (
+                options.body.includes('"prompt"') ||
+                options.body.includes('"text"')
+            ))
         );
         
-        // 排除非LLM请求
         const isExcludedRequest = url && (
             url.includes('/api/chats/') || 
             url.includes('/api/characters') || 
@@ -693,52 +696,62 @@ function interceptApiRequests() {
             url.includes('/api/images') || 
             url.includes('/api/files') ||
             url.includes('/api/worldinfo') ||
-            url.includes('.png') || url.includes('.jpg') || url.includes('.gif')
+            url.includes('/api/presets') ||
+            url.includes('.png') || 
+            url.includes('.jpg') || 
+            url.includes('.gif') ||
+            url.includes('.css') ||
+            url.includes('.js') ||
+            url.includes('/health') ||
+            url.includes('/status') ||
+            url.includes('/models') ||
+            (url.includes('/models') && !options.body.includes('"messages"'))
         );
         
         if (isLLMRequest && !isExcludedRequest && options?.body) {
             try {
                 const requestData = JSON.parse(options.body);
                 
-                if (requestData.messages && requestData.messages.length > 0) {
+                if (requestData.messages && Array.isArray(requestData.messages) && requestData.messages.length > 0) {
                     const apiData = {
                         url, 
                         model: requestData.model || 'Unknown', 
                         timestamp: Date.now(),
                         messages: requestData.messages, 
-                        fullRequest: requestData
+                        fullRequest: requestData,
+                        endpoint: extractEndpointInfo(url)
                     };
                     
-                    // 只有非预览模式的请求才保存到历史
                     if (!apiData.isPreview) {
                         lastApiRequest = apiData;
                         saveApiRequestToHistory(apiData);
-                        console.log('[预览] 拦截到真实API请求，消息数量:', requestData.messages.length);
                     }
                 }
             } catch (e) {
-                console.warn('[预览] 解析API请求失败:', e);
+                if (options.body.includes('messages')) {
+                    lastApiRequest = {
+                        url,
+                        model: 'Unknown',
+                        timestamp: Date.now(),
+                        messages: [],
+                        rawBody: options.body,
+                        parseError: e.message,
+                        endpoint: extractEndpointInfo(url)
+                    };
+                }
             }
         }
         
         return originalFetch.apply(this, args);
     };
-    
-    console.log('[预览] API请求拦截器已安装');
 }
 
-// 模块初始化
 function initMessagePreview() {
     try {
-        console.log('[预览] 开始初始化消息预览模块');
-        
-        // 安装API请求拦截器
         interceptApiRequests();
         
-        // 将预览按钮添加到发送按钮前
         $("#send_but").before(createPreviewButton());
         
-        // 初始化设置
         const settings = getSettings();
         $("#xiaobaix_preview_enabled").prop("checked", settings.enabled).on("change", function() {
             settings.enabled = $(this).prop("checked");
@@ -754,14 +767,11 @@ function initMessagePreview() {
         
         if (!settings.enabled) $('#message_preview_btn').hide();
         
-        // 添加历史按钮到现有消息
         setTimeout(() => {
             addHistoryButtonsToMessages();
         }, 500);
         
-        // 设置事件监听器
         if (eventSource) {
-            // 消息渲染事件
             const messageEvents = [
                 event_types.CHARACTER_MESSAGE_RENDERED, 
                 event_types.USER_MESSAGE_RENDERED, 
@@ -775,16 +785,13 @@ function initMessagePreview() {
                 });
             });
             
-            // 聊天切换事件
             eventSource.on(event_types.CHAT_CHANGED, () => {
                 setTimeout(() => {
                     addHistoryButtonsToMessages();
                     apiRequestHistory = [];
-                    console.log('[预览] 聊天切换，清空API历史');
                 }, 300);
             });
-            
-            // 消息接收事件 - 关联消息ID
+
             eventSource.on(event_types.MESSAGE_RECEIVED, (messageId) => {
                 setTimeout(() => {
                     const recentRequest = apiRequestHistory.find(record =>
@@ -792,18 +799,12 @@ function initMessagePreview() {
                     );
                     if (recentRequest) {
                         recentRequest.associatedMessageId = messageId;
-                        console.log('[预览] 关联消息ID:', messageId);
                     }
                 }, 200);
             });
         }
         
-        console.log('[预览] 消息预览模块初始化完成');
-        
-    } catch (error) {
-        console.error('[预览] 消息预览模块初始化失败:', error);
-    }
+    } catch (error) {}
 }
 
-// 导出函数
 export { initMessagePreview };
