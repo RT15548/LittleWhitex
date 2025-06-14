@@ -1,0 +1,80 @@
+LittleWhiteBox (小白X) - Copyright and Attribution Requirements
+================================================================
+
+Copyright (C) 2025 biex
+All rights reserved.
+
+This software is licensed under the GNU Affero General Public License v3.0 
+with additional custom attribution requirements.
+
+MANDATORY ATTRIBUTION REQUIREMENTS
+==================================
+
+1. AUTHOR ATTRIBUTION
+   - The original author "biex" MUST be prominently credited in any derivative work
+   - This credit must appear in:
+     * Software user interface (visible to end users)
+     * Documentation and README files
+     * Source code headers
+     * About/Credits sections
+     * Any promotional or marketing materials
+
+2. PROJECT ATTRIBUTION
+   - The project name "LittleWhiteBox" and "小白X" must be credited
+   - Required attribution format: "Based on LittleWhiteBox by biex"
+   - Project URL must be included: https://github.com/RT15548/LittleWhiteBox
+
+3. SOURCE CODE DISCLOSURE
+   - Any modification, enhancement, or derivative work MUST be open source
+   - Source code must be publicly accessible under the same license terms
+   - All changes must be clearly documented and attributed
+
+4. NETWORK USE DISCLOSURE (AGPL Requirement)
+   - If this software is used to provide a service over a network
+   - The complete source code (including all modifications) must be made available
+   - Source code must be accessible to all users of the network service
+
+5. COMMERCIAL USE RESTRICTIONS
+   - Commercial use requires explicit written permission from the original author
+   - Contact the author through the project repository for commercial licensing
+   - Unauthorized commercial use is strictly prohibited
+
+6. TRADEMARK PROTECTION
+   - "LittleWhiteBox" and "小白X" are trademarks of the original author
+   - Derivative works may not use these names without explicit permission
+   - Alternative naming must clearly indicate the derivative nature
+
+VIOLATION CONSEQUENCES
+=====================
+
+Any violation of these attribution requirements will result in:
+- Immediate termination of the license grant
+- Legal action for copyright infringement
+- Demand for removal of infringing content
+- Potential monetary damages
+
+COMPLIANCE EXAMPLES
+==================
+
+✅ CORRECT Attribution Examples:
+- "Powered by LittleWhiteBox by biex"
+- "Based on LittleWhiteBox (https://github.com/RT15548/LittleWhiteBox) by biex"
+- "Enhanced version of LittleWhiteBox by biex - Original: [repository URL]"
+
+❌ INCORRECT Examples:
+- Using the code without any attribution
+- Claiming original authorship
+- Using "LittleWhiteBox" name for derivative works
+- Commercial use without permission
+- Closed-source modifications
+
+CONTACT INFORMATION
+==================
+
+For licensing inquiries, commercial use requests, or attribution questions:
+- Repository: https://github.com/RT15548/LittleWhiteBox
+- Author: biex
+- License: AGPL-3.0-or-later WITH Custom-Attribution-Requirements
+
+This copyright notice and attribution requirements must be included in all
+copies or substantial portions of the software.

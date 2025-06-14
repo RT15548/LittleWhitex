@@ -1,8 +1,38 @@
+/**
+ * LittleWhiteBox (小白X) - Advanced Browser Extension
+ *
+ * Copyright (C) 2025 biex
+ * All rights reserved.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ *
+ * ADDITIONAL ATTRIBUTION REQUIREMENTS:
+ * Any use, modification, or distribution of this software must include
+ * prominent attribution to the original author "biex" and the project
+ * "LittleWhiteBox". See LICENSE.md for complete terms.
+ *
+ * Project: https://github.com/RT15548/LittleWhiteBox
+ * Author: biex
+ * License: AGPL-3.0-or-later WITH Custom-Attribution-Requirements
+ */
+
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced } from "../../../../script.js";
 import { statsTracker } from "./statsTracker.js";
 import { initTasks } from "./scheduledTasks.js";
 import { initScriptAssistant } from "./scriptAssistant.js";
+import { initMessagePreview } from "./message-preview.js";
 
 const EXT_ID = "LittleWhiteBox";
 const EXT_NAME = "小白X";
@@ -596,6 +626,7 @@ function processExistingMessages() {
 
 async function initExtension() {
     try {
+        // 加载样式
         const response = await fetch(`${extensionFolderPath}/style.css`);
         const styleText = await response.text();
         
@@ -603,18 +634,21 @@ async function initExtension() {
         styleElement.textContent = styleText;
         document.head.appendChild(styleElement);
         
-        // 初始化统计追踪器
+        // 首先初始化统计追踪器
         statsTracker.init(EXT_ID, MODULE_NAME, settings, executeSlashCommand);
         
+        // 然后设置基本功能
         await setupSettings();
         setupEventListeners();
         initTasks();
         initScriptAssistant();
-        // 确保菜单切换在所有初始化完成后设置
+        
+        // 设置菜单切换
         setTimeout(() => {
             setupMenuTabs();
         }, 500);
         
+        // 处理消息历史和统计
         setTimeout(async () => {
             processExistingMessages();
             
@@ -636,9 +670,19 @@ async function initExtension() {
             }
         }, 1000);
         
+        // 最后再初始化消息预览功能
+        // 这样可以确保 statsTracker 已完全初始化
+        setTimeout(() => {
+            initMessagePreview();
+        }, 1500);
+        
+        // 定期处理消息
         setInterval(processExistingMessages, 5000);
-    } catch (err) {}
+    } catch (err) {
+        console.error('[小白X] 初始化出错:', err);
+    }
 }
+
 
 // 导出执行命令函数给其他模块使用
 export { executeSlashCommand };

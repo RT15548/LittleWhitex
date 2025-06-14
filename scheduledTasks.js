@@ -1,3 +1,32 @@
+/**
+ * LittleWhiteBox (小白X) - Scheduled Tasks Module
+ *
+ * Copyright (C) 2025 biex
+ * All rights reserved.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ *
+ * ADDITIONAL ATTRIBUTION REQUIREMENTS:
+ * Any use, modification, or distribution of this software must include
+ * prominent attribution to the original author "biex" and the project
+ * "LittleWhiteBox". See LICENSE.md for complete terms.
+ *
+ * Project: https://github.com/RT15548/LittleWhiteBox
+ * Author: biex
+ * License: AGPL-3.0-or-later WITH Custom-Attribution-Requirements
+ */
+
 import { extension_settings, getContext, writeExtensionField, renderExtensionTemplateAsync } from "../../../extensions.js";
 import { saveSettingsDebounced, eventSource, event_types, characters, this_chid, chat } from "../../../../script.js";
 import { executeSlashCommandsWithOptions } from "../../../slash-commands.js";

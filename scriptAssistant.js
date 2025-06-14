@@ -1,3 +1,32 @@
+/**
+ * LittleWhiteBox (小白X) - Advanced Browser Extension
+ *
+ * Copyright (C) 2025 biex
+ * All rights reserved.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ *
+ * ADDITIONAL ATTRIBUTION REQUIREMENTS:
+ * Any use, modification, or distribution of this software must include
+ * prominent attribution to the original author "biex" and the project
+ * "LittleWhiteBox". See LICENSE.md for complete terms.
+ *
+ * Project: https://github.com/RT15548/LittleWhiteBox
+ * Author: biex
+ * License: AGPL-3.0-or-later WITH Custom-Attribution-Requirements
+ */
+
 import { extension_settings, getContext } from "../../../extensions.js";
 import { saveSettingsDebounced } from "../../../../script.js";
 import { setExtensionPrompt, extension_prompt_types } from "../../../../script.js";
@@ -84,9 +113,9 @@ async function injectScriptDocs() {
 
 1. 代码块渲染功能:
    - SillyTavern原生只支持显示静态代码块，无法执行JavaScript或渲染HTML
-   - 小白X将聊天中被\`\`\`包裹的代码块自动转换为功能完整的网页(iframe)
-   - 代码块内的HTML/CSS/JavaScript将被完整执行，形成真正的交互式界面
-   - 提供STscript()函数作为特殊API，让网页界面能执行SillyTavern命令:
+   - 小白X将聊天中被\`\`\`包裹的html标签自动转换为iframe
+   - 代码块内的HTML/CSS/JavaScript将被完整执行，形成真正的交互式界面，为了代码完整和可维护，最好使用html标签渲染
+   - 提供STscript()函数作为特殊API，让iframe能执行SillyTavern的STscript斜杠命令:
  
    正确用法示例:
    \`\`\`javascript
