@@ -200,8 +200,8 @@ pre:has(+ .xiaobaix-iframe) {
     flex-grow: 1;
     font-size: calc(var(--mainFontSize) * 0.95);
     line-height: 1.4;
-    white-space: pre-wrap; /* 保持换行和空格 */
-    word-wrap: break-word; /* 长单词换行 */
+    white-space: pre-wrap;
+    word-wrap: break-word;
 }
 
 @media screen and (min-width: 1001px) {
@@ -441,7 +441,7 @@ pre:has(+ .xiaobaix-iframe) {
     white-space: nowrap;
 }
 
-/* 新增：追踪人物操作按钮 */
+/* 追踪人物操作按钮 */
 .tracked-name-actions {
     display: flex;
     gap: 3px;
@@ -469,7 +469,7 @@ pre:has(+ .xiaobaix-iframe) {
     opacity: 1;
 }
 
-/* 新增：好感度输入框 */
+/* 好感度输入框 */
 .tracked-intimacy-input {
     width: 100px;
     background: var(--SmartThemeBlurTintColor);
@@ -488,7 +488,7 @@ pre:has(+ .xiaobaix-iframe) {
     box-shadow: 0 0 0 2px var(--SmartThemeAccent30a);
 }
 
-/* 新增：编辑人物对话框 */
+/* 编辑人物对话框 */
 .xiaobaix-edit-name-modal {
     position: fixed;
     top: 0;
@@ -655,7 +655,6 @@ pre:has(+ .xiaobaix-iframe) {
         gap: 4px;
     }
     
-    /* 窄屏幕下的追踪人物项调整 */
     .tracked-name-item {
         flex-wrap: wrap;
         padding: 8px 10px;
@@ -725,7 +724,6 @@ pre:has(+ .xiaobaix-iframe) {
 
 /* 阶段内容区 */
 .behavior-stage-content {
-    /* 保持原位置，只更新样式 */
     background: var(--SmartThemeBlurTintColor);
     border: 1px solid var(--SmartThemeBorderColor);
     border-radius: 8px;
@@ -932,7 +930,6 @@ pre:has(+ .xiaobaix-iframe) {
     color: #ffffff !important;
     font-size: 12px;
     line-height: 1.4;
-    margin-bottom: 15px;
 }
 
 .mes_history_preview {
@@ -967,4 +964,111 @@ pre:has(+ .xiaobaix-iframe) {
 .memory-tab-content::-webkit-scrollbar-thumb:hover,
 .message-preview-content-box::-webkit-scrollbar-thumb:hover {
     background: var(--SmartThemeAccent);
+}
+
+/* 循环任务样式 */
+.task-container {
+    margin-top: 10px;
+    margin-bottom: 10px;
+}
+
+.task-container:empty::after {
+    content: "No tasks found";
+    font-size: 0.95em;
+    opacity: 0.7;
+    display: block;
+    text-align: center;
+}
+
+.task-item {
+    align-items: center;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 10px;
+    padding: 0 5px;
+    margin-top: 1px;
+    margin-bottom: 1px;
+}
+
+.task-item:has(.disable_task:checked) .task_name {
+    text-decoration: line-through;
+    filter: grayscale(0.5);
+}
+
+.task_name {
+    font-weight: normal;
+    color: var(--SmartThemeEmColor);
+    font-size: 0.9em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.drag-handle {
+    cursor: grab;
+    color: var(--SmartThemeQuoteColor);
+    margin-right: 8px;
+    user-select: none;
+}
+
+.drag-handle:active {
+    cursor: grabbing;
+}
+
+.menu_button {
+    width: fit-content;
+    display: flex;
+    gap: 10px;
+    flex-direction: row;
+}
+
+.checkbox {
+    align-items: center;
+}
+
+.task_editor {
+    width: 100%;
+}
+
+.task_editor .flex-container {
+    gap: 10px;
+}
+
+.task_editor textarea {
+    font-family: 'Courier New', monospace;
+}
+
+input.disable_task {
+    display: none !important;
+}
+
+.task-toggle-off {
+    cursor: pointer;
+    opacity: 0.5;
+    filter: grayscale(0.5);
+    transition: opacity 0.2s ease-in-out;
+}
+
+.task-toggle-off:hover {
+    opacity: 1;
+    filter: none;
+}
+
+.task-toggle-on {
+    cursor: pointer;
+}
+
+.disable_task:checked ~ .task-toggle-off {
+    display: block;
+}
+
+.disable_task:checked ~ .task-toggle-on {
+    display: none;
+}
+
+.disable_task:not(:checked) ~ .task-toggle-off {
+    display: none;
+}
+
+.disable_task:not(:checked) ~ .task-toggle-on {
+    display: block;
 }
