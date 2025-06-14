@@ -6,10 +6,6 @@
     "js": "index.js",
     "css": "style.css",
     "author": "biex",
-    "version": "1.1.0",
-    "homePage": "https://github.com/RT15548/LittleWhiteBox",
-    "license": "Apache-2.0",
-    "copyright": "Copyright 2025 biex",
-    "description": "LittleWhiteBox (小白X) - Advanced browser extension with memory tracking and script assistance features",
-    "attribution": "Based on LittleWhiteBox by biex - https://github.com/RT15548/LittleWhiteBox"
+    "version": "1.0.3",
+    "homePage": "https://github.com/RT15548/LittleWhiteBox"
 }

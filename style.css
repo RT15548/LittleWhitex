@@ -380,142 +380,6 @@ pre:has(+ .xiaobaix-iframe) {
     font-weight: 500;
 }
 
-/* 循环任务样式 */
-.task-container {
-    margin-top: 10px;
-    margin-bottom: 10px;
-}
-
-.task-container:empty::after {
-    content: "No tasks found";
-    font-size: 0.95em;
-    opacity: 0.7;
-    display: block;
-    text-align: center;
-}
-
-.task-item {
-    align-items: center;
-    border: 1px solid var(--SmartThemeBorderColor);
-    border-radius: 10px;
-    padding: 0 5px;
-    margin-top: 1px;
-    margin-bottom: 1px;
-}
-
-.task-item:has(.disable_task:checked) .task_name {
-    text-decoration: line-through;
-    filter: grayscale(0.5);
-}
-
-.task_name {
-    font-weight: normal;
-    color: var(--SmartThemeEmColor);
-    font-size: 0.9em;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.drag-handle {
-    cursor: grab;
-    color: var(--SmartThemeQuoteColor);
-    margin-right: 8px;
-    user-select: none;
-}
-
-.drag-handle:active {
-    cursor: grabbing;
-}
-
-.menu_button {
-    width: fit-content;
-    display: flex;
-    gap: 10px;
-    flex-direction: row;
-}
-
-.checkbox {
-    align-items: center;
-}
-
-.task_editor {
-    width: 100%;
-}
-
-.task_editor .flex-container {
-    gap: 10px;
-}
-
-.task_editor textarea {
-    font-family: 'Courier New', monospace;
-}
-
-/* 嵌入任务警告样式 */
-.scheduled-tasks-embedded-warning {
-    max-width: 500px;
-    padding: 20px;
-}
-
-.scheduled-tasks-embedded-warning h3 {
-    color: #ff6b6b;
-    margin-bottom: 15px;
-}
-
-.task-preview-container {
-    margin: 15px 0;
-    padding: 10px;
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 5px;
-}
-
-.task-list {
-    max-height: 200px;
-    overflow-y: auto;
-    margin-top: 10px;
-}
-
-.task-preview {
-    margin: 8px 0;
-    padding: 8px;
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 3px;
-    border-left: 3px solid #4CAF50;
-}
-
-.task-preview strong {
-    color: #4CAF50;
-    display: block;
-    margin-bottom: 5px;
-}
-
-.task-commands {
-    font-family: monospace;
-    font-size: 0.9em;
-    color: #ccc;
-    background: rgba(0, 0, 0, 0.3);
-    padding: 5px;
-    border-radius: 3px;
-    margin-top: 5px;
-    white-space: pre-wrap;
-}
-
-.warning-note {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-top: 15px;
-    padding: 10px;
-    background: rgba(255, 193, 7, 0.1);
-    border: 1px solid rgba(255, 193, 7, 0.3);
-    border-radius: 5px;
-    color: #ffc107;
-}
-
-.warning-note i {
-    font-size: 1.2em;
-}
-
 /* 追踪人物卡片 */
 .tracked-names-card {
     margin-bottom: 16px;
@@ -1059,7 +923,7 @@ pre:has(+ .xiaobaix-iframe) {
 .message-preview-content-box {
     font-family: 'Courier New', 'Monaco', 'Menlo', monospace;
     white-space: pre-wrap;
-    height: 100%;
+    max-height: 70vh;
     overflow-y: auto;
     padding: 15px;
     background: #000000 !important;
@@ -1068,6 +932,7 @@ pre:has(+ .xiaobaix-iframe) {
     color: #ffffff !important;
     font-size: 12px;
     line-height: 1.4;
+    margin-bottom: 15px;
 }
 
 .mes_history_preview {
@@ -1079,47 +944,6 @@ pre:has(+ .xiaobaix-iframe) {
 .mes_history_preview:hover {
     opacity: 1;
     color: #D2691E;
-}
-
-/* ===== 任务checkbox toggle样式 ===== */
-/* 隐藏原生checkbox */
-input.disable_task {
-    display: none !important;
-}
-
-/* toggle图标基础样式 */
-.task-toggle-off {
-    cursor: pointer;
-    opacity: 0.5;
-    filter: grayscale(0.5);
-    transition: opacity 0.2s ease-in-out;
-}
-
-.task-toggle-off:hover {
-    opacity: 1;
-    filter: none;
-}
-
-.task-toggle-on {
-    cursor: pointer;
-}
-
-/* checkbox未选中时的状态 (任务启用) */
-.disable_task:not(:checked) ~ .task-toggle-off {
-    display: none;
-}
-
-.disable_task:not(:checked) ~ .task-toggle-on {
-    display: block;
-}
-
-/* checkbox选中时的状态 (任务禁用) */
-.disable_task:checked ~ .task-toggle-off {
-    display: block;
-}
-
-.disable_task:checked ~ .task-toggle-on {
-    display: none;
 }
 
 /* ===== 滚动条样式 ===== */
