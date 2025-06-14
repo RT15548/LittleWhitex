@@ -19,14 +19,12 @@ const defaultSettings = {
     character_allowed_tasks: [] 
 };
 
-// 优化后的常量设置
 const MAX_PROCESSED_MESSAGES = 20;
 const MAX_COOLDOWN_ENTRIES = 10;
 const CLEANUP_INTERVAL = 30000;
 const TASK_COOLDOWN = 3000;
 const DEBOUNCE_DELAY = 1000;
 
-// 全局变量
 let currentEditingTask = null;
 let currentEditingIndex = -1;
 let lastChatId = null;
@@ -39,12 +37,11 @@ let taskLastExecutionTime = new Map();
 let cleanupTimer = null;
 let lastTasksHash = '';
 
-// 优化的防抖保存
 const debouncedSave = debounce(() => {
     saveSettingsDebounced();
 }, DEBOUNCE_DELAY);
 
-// 获取并初始化设置
+// 初始化
 function getSettings() {
     if (!extension_settings[EXT_ID].tasks) {
         extension_settings[EXT_ID].tasks = structuredClone(defaultSettings);
@@ -56,12 +53,11 @@ function getSettings() {
     return settings;
 }
 
-// 定期清理内存
+// 清理
 function scheduleCleanup() {
     if (cleanupTimer) return;
     
     cleanupTimer = setInterval(() => {
-        // 清理过期的冷却记录
         const now = Date.now();
         for (const [taskName, lastTime] of taskLastExecutionTime.entries()) {
             if (now - lastTime > TASK_COOLDOWN * 2) {
@@ -69,7 +65,6 @@ function scheduleCleanup() {
             }
         }
         
-        // 限制冷却记录数量
         if (taskLastExecutionTime.size > MAX_COOLDOWN_ENTRIES) {
             const entries = Array.from(taskLastExecutionTime.entries());
             entries.sort((a, b) => b[1] - a[1]);
@@ -79,7 +74,6 @@ function scheduleCleanup() {
             });
         }
         
-        // 清理过期消息记录
         const settings = getSettings();
         if (settings.processedMessages.length > MAX_PROCESSED_MESSAGES) {
             settings.processedMessages = settings.processedMessages.slice(-MAX_PROCESSED_MESSAGES);
@@ -99,7 +93,7 @@ function setTaskCooldown(taskName) {
     taskLastExecutionTime.set(taskName, Date.now());
 }
 
-// 优化的消息处理状态管理
+// 消息处理状态管理
 function isMessageProcessed(messageKey) { 
     return getSettings().processedMessages.includes(messageKey); 
 }
@@ -110,7 +104,6 @@ function markMessageAsProcessed(messageKey) {
     
     settings.processedMessages.push(messageKey);
     
-    // 立即清理，避免内存过度使用
     if (settings.processedMessages.length > MAX_PROCESSED_MESSAGES) {
         settings.processedMessages = settings.processedMessages.slice(-Math.floor(MAX_PROCESSED_MESSAGES/2));
     }
@@ -211,7 +204,6 @@ async function checkAndExecuteTasks(triggerContext = 'after_ai', overrideChatCha
         }
     });
     
-    // 批量执行
     for (const task of tasksToExecute) {
         taskLastExecutionTime.set(task.name, now);
         await executeCommands(task.commands, task.name);
@@ -693,14 +685,12 @@ function registerSlashCommands() {
 
 // 初始化模块
 function initTasks() {
-    // 启动内存清理定时器
     scheduleCleanup();
     
     if (!extension_settings[EXT_ID].tasks) {
         extension_settings[EXT_ID].tasks = structuredClone(defaultSettings);
     }
     
-    // 绑定UI事件
     $('#scheduled_tasks_enabled').on('input', e => { 
         getSettings().enabled = $(e.target).prop('checked'); 
         debouncedSave(); 
