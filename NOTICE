@@ -8,8 +8,8 @@ PRIMARY SOFTWARE
 ================
 
 LittleWhiteBox (小白X)
-Copyright (C) 2025 biex
-Licensed under AGPL-3.0-or-later WITH Custom-Attribution-Requirements
+Copyright 2025 biex
+Licensed under Apache-2.0 WITH Custom-Attribution-Requirements
 Repository: https://github.com/RT15548/LittleWhiteBox
 
 RUNTIME DEPENDENCIES
@@ -78,7 +78,7 @@ When distributing this software or derivative works, you must:
 2. Maintain all copyright notices in source code
 3. Provide attribution to the original author "biex"
 4. Include a link to the original repository
-5. Comply with AGPL-3.0 license requirements
+5. Comply with Apache-2.0 license requirements
 6. Follow the custom attribution requirements in LICENSE.md
 
 DISCLAIMER

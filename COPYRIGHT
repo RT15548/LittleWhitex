@@ -1,10 +1,9 @@
 LittleWhiteBox (小白X) - Copyright and Attribution Requirements
 ================================================================
 
-Copyright (C) 2025 biex
-All rights reserved.
+Copyright 2025 biex
 
-This software is licensed under the GNU Affero General Public License v3.0 
+This software is licensed under the Apache License 2.0
 with additional custom attribution requirements.
 
 MANDATORY ATTRIBUTION REQUIREMENTS
@@ -29,17 +28,12 @@ MANDATORY ATTRIBUTION REQUIREMENTS
    - Source code must be publicly accessible under the same license terms
    - All changes must be clearly documented and attributed
 
-4. NETWORK USE DISCLOSURE (AGPL Requirement)
-   - If this software is used to provide a service over a network
-   - The complete source code (including all modifications) must be made available
-   - Source code must be accessible to all users of the network service
+4. COMMERCIAL USE
+   - Commercial use is permitted under the Apache License 2.0 terms
+   - Attribution requirements still apply for commercial use
+   - No additional permission required for commercial use
 
-5. COMMERCIAL USE RESTRICTIONS
-   - Commercial use requires explicit written permission from the original author
-   - Contact the author through the project repository for commercial licensing
-   - Unauthorized commercial use is strictly prohibited
-
-6. TRADEMARK PROTECTION
+5. TRADEMARK PROTECTION
    - "LittleWhiteBox" and "小白X" are trademarks of the original author
    - Derivative works may not use these names without explicit permission
    - Alternative naming must clearly indicate the derivative nature
@@ -51,7 +45,6 @@ Any violation of these attribution requirements will result in:
 - Immediate termination of the license grant
 - Legal action for copyright infringement
 - Demand for removal of infringing content
-- Potential monetary damages
 
 COMPLIANCE EXAMPLES
 ==================
@@ -71,10 +64,10 @@ COMPLIANCE EXAMPLES
 CONTACT INFORMATION
 ==================
 
-For licensing inquiries, commercial use requests, or attribution questions:
+For licensing inquiries or attribution questions:
 - Repository: https://github.com/RT15548/LittleWhiteBox
 - Author: biex
-- License: AGPL-3.0-or-later WITH Custom-Attribution-Requirements
+- License: Apache-2.0 WITH Custom-Attribution-Requirements
 
 This copyright notice and attribution requirements must be included in all
 copies or substantial portions of the software.
