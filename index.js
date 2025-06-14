@@ -10,7 +10,6 @@ const EXT_NAME = "小白X";
 const MODULE_NAME = "xiaobaix-memory";
 const extensionFolderPath = `scripts/extensions/third-party/${EXT_ID}`;
 
-// 初始化插件设置
 extension_settings[EXT_ID] = extension_settings[EXT_ID] || {
     enabled: true,
     sandboxMode: false,
@@ -21,7 +20,6 @@ extension_settings[EXT_ID] = extension_settings[EXT_ID] || {
 
 const settings = extension_settings[EXT_ID];
 
-// 辅助函数
 async function waitForElement(selector, root = document, timeout = 10000) {
     const start = Date.now();
     while (Date.now() - start < timeout) {
@@ -36,7 +34,6 @@ function generateUniqueId() {
     return `xiaobaix-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 }
 
-// 内容渲染逻辑
 function shouldRenderContent(content, className) {
     if (!content || typeof content !== 'string') return false;
     
@@ -166,7 +163,6 @@ function createIframeApi() {
     `;
 }
 
-// 斜杠命令执行
 async function executeSlashCommand(command) {
     try {
         if (!command) return { error: "命令为空" };
@@ -214,7 +210,6 @@ async function executeSlashCommand(command) {
     }
 }
 
-// iframe 通信处理
 function handleIframeMessage(event) {
     if (!event.data || event.data.source !== 'xiaobaix-iframe') return;
     
@@ -262,7 +257,6 @@ async function handleCommandMessage(source, data) {
     }
 }
 
-// HTML 渲染
 function renderHtmlInIframe(htmlContent, container, codeBlock) {
     try {
         const iframeId = generateUniqueId();
@@ -354,7 +348,6 @@ ${htmlContent}
 </html>`;
 }
 
-// 代码块处理
 function processCodeBlocks(messageElement) {
     if (!settings.enabled) return;
     
@@ -377,7 +370,6 @@ function processCodeBlocks(messageElement) {
     } catch (err) {}
 }
 
-// 设置面板
 async function setupSettings() {
     try {
         const settingsContainer = await waitForElement("#extensions_settings");
@@ -431,7 +423,6 @@ async function setupSettings() {
     } catch (err) {}
 }
 
-// 设置菜单标籤切换功能
 function setupMenuTabs() {
     console.log('Setting up menu tabs...');
 
@@ -490,7 +481,6 @@ function setupMenuTabs() {
     }, 300);
 }
 
-// 事件监听
 function setupEventListeners() {
     const { eventSource, event_types } = getContext();
     
@@ -589,7 +579,6 @@ function processExistingMessages() {
 
 async function initExtension() {
     try {
-        // 加载样式
         const response = await fetch(`${extensionFolderPath}/style.css`);
         const styleText = await response.text();
         
@@ -633,7 +622,6 @@ async function initExtension() {
             initMessagePreview();
         }, 1500);
         
-        // 定期处理消息
         setInterval(processExistingMessages, 5000);
     } catch (err) {
         console.error('[小白X] 初始化出错:', err);
@@ -643,5 +631,4 @@ async function initExtension() {
 
 export { executeSlashCommand };
 
-// 初始化插件
 initExtension();
