@@ -110,8 +110,30 @@ async function injectScriptDocs() {
    - 注册了/xbset命令调整任务间隔: \`/xbset 任务名称 间隔数字\`
    - 任务命令可以使用所有标准STscript斜杠命令
 
-以下是SillyTavern命令STscript的完整文档，请基于这些内容和小白X插件功能回答用户问题:
+3. 与SillyTavern正则表达式功能的配合:
+   - SillyTavern提供了原生的正则设置功能，用于自动转换AI的消息输出
+   - 当设计包含交互界面的角色卡时，你应该教导用户如何使用这一功能
+   - 正确的工作流是:
+     a) 在AI输出中包含特定标记(如\`[状态面板]\`)
+     b) 在角色卡设置的格式化功能中添加正则表达式来替换这些标记为HTML代码
+     c) 勾选小白X的代码块渲染功能显示交互式界面
+   
+   正则表达式示例:
+   - 格式: \`/\\[状态面板\\]/g\` (匹配文本)
+   - 替换为: \`\`\`html
+<div id="status">
+  <h3>角色状态</h3>
+  <p>HP: <span id="hp">100</span>/100</p>
+  <script>
+    // 脚本代码
+  </script>
+</div>
+\`\`\`
 
+   这样设置后，每当AI输出包含[状态面板]时，SillyTavern会自动将其替换为HTML代码块，
+   然后小白X会将其渲染为可交互的界面。
+
+以下是SillyTavern命令STscript的完整文档，请基于这些内容和小白X插件功能回答用户问题:
 ${docsContent}
 `;
         
