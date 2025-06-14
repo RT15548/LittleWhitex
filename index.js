@@ -435,25 +435,19 @@ async function setupSettings() {
 function setupMenuTabs() {
     console.log('Setting up menu tabs...');
 
-    // 为菜单标籤添加点击事件
     $(document).on('click', '.menu-tab', function() {
         console.log('Menu tab clicked:', $(this).attr('data-target'));
         const targetId = $(this).attr('data-target');
 
-        // 移除所有活动状态
         $('.menu-tab').removeClass('active');
 
-        // 隐藏所有设置区域
         $('.settings-section').hide();
 
-        // 激活当前标籤
         $(this).addClass('active');
 
-        // 显示对应的设置区域
         $('.' + targetId).show();
     });
 
-    // 设置默认状态：显示小白X区域，隐藏其他区域
     setTimeout(() => {
         console.log('Setting default tab state...');
         const jsMemorySection = $('.js-memory');
@@ -473,19 +467,17 @@ function setupMenuTabs() {
         });
 
         if (jsMemorySection.length && taskSection.length && instructionsSection.length) {
-            // 显示小白X，隐藏其他
             jsMemorySection.show();
             taskSection.hide();
             instructionsSection.hide();
 
-            // 设置活动标籤
             jsMemoryTab.addClass('active');
             taskTab.removeClass('active');
             instructionsTab.removeClass('active');
             console.log('Default state set successfully');
         } else {
             console.log('Some elements not found, retrying...');
-            // 如果元素还没有准备好，再试一次
+
             setTimeout(() => {
                 $('.js-memory').show();
                 $('.task').hide();
@@ -605,21 +597,17 @@ async function initExtension() {
         styleElement.textContent = styleText;
         document.head.appendChild(styleElement);
         
-        // 首先初始化统计追踪器
         statsTracker.init(EXT_ID, MODULE_NAME, settings, executeSlashCommand);
         
-        // 然后设置基本功能
         await setupSettings();
         setupEventListeners();
         initTasks();
         initScriptAssistant();
         
-        // 设置菜单切换
         setTimeout(() => {
             setupMenuTabs();
         }, 500);
         
-        // 处理消息历史和统计
         setTimeout(async () => {
             processExistingMessages();
             
@@ -641,8 +629,6 @@ async function initExtension() {
             }
         }, 1000);
         
-        // 最后再初始化消息预览功能
-        // 这样可以确保 statsTracker 已完全初始化
         setTimeout(() => {
             initMessagePreview();
         }, 1500);
@@ -655,7 +641,6 @@ async function initExtension() {
 }
 
 
-// 导出执行命令函数给其他模块使用
 export { executeSlashCommand };
 
 // 初始化插件
