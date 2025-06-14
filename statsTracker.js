@@ -16,11 +16,9 @@
  * limitations under the License.
  *
  * ADDITIONAL TERMS:
- * Any use, modification, or distribution of this software must include
- * prominent attribution to the original author "biex" and the project
- * "LittleWhiteBox".
- *
- * License: Apache-2.0 WITH Custom-Attribution-Requirements
+ * If you reference, modify, or distribute any file from this project,
+ * you must include attribution to the original author "biex" in your
+ * project documentation, README, or credits section.
  */
 
 import { setExtensionPrompt, extension_prompt_types, extension_prompt_roles, characters, this_chid, eventSource, event_types } from "../../../../script.js";
